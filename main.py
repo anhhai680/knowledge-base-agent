@@ -8,7 +8,6 @@ This is the MVP implementation of the Knowledge Base Agent that can:
 """
 
 import uvicorn
-from src.api.routes import app
 from src.config.settings import settings
 from src.utils.logging import setup_logging, get_logger
 
@@ -22,9 +21,12 @@ def main():
     logger.info(f"Environment: {settings.app_env}")
     logger.info(f"API will be available at: http://{settings.api_host}:{settings.api_port}")
     
+    # Import app after settings are loaded
+    from src.api.routes import app
+    
     # Run the application
     uvicorn.run(
-        "main:app",
+        app,
         host=settings.api_host,
         port=settings.api_port,
         reload=settings.app_env == "development",
