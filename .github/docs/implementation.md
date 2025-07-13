@@ -8,8 +8,8 @@ This document outlines the implementation of an AI Agent with RAG (Retrieval-Aug
 - Index all documents and files in GitHub Repository based on list of URLs provided using Github MCP tool
 - Using Python language for AI Agent
 - Using LangChain framework to build AI Agent
-- Support multiple LLM models (OpenAI, Bedrock, Azure OpenAI...)
-- Using vector database with Pinecone for local environment and pgvector for cloud
+- Support multiple LLM models (OpenAI, Gemini, Azure OpenAI...)
+- Using vector database with Chroma for local environment and pgvector for cloud
 
 ## Architecture Overview
 
@@ -43,7 +43,7 @@ graph TB
     
     %% Vector Storage
     subgraph "Vector Storage"
-        PC[Pinecone]
+        CH[Chroma]
         PG[pgvector]
     end
     
@@ -79,7 +79,7 @@ graph TB
     TP --> CH
     CH --> EM
     
-    EM --> PC
+    EM --> CH
     EM --> PG
     
     API --> Auth
@@ -87,7 +87,7 @@ graph TB
     RL --> QP
     
     QP --> CR
-    CR --> PC
+    CR --> CH
     CR --> PG
     
     CR --> RA
@@ -144,10 +144,10 @@ flowchart TD
     CHUNK --> EMBED[Generate Embeddings]
     
     EMBED --> STORE{Storage Type}
-    STORE -->|Local| PINECONE[Store in Pinecone]
+    STORE -->|Local| CHROMA[Store in Chroma]
     STORE -->|Cloud| PGVECTOR[Store in pgvector]
     
-    PINECONE --> INDEX[Update Index]
+    CHROMA --> INDEX[Update Index]
     PGVECTOR --> INDEX
     
     INDEX --> NOTIFY[Notify Completion]
@@ -180,7 +180,7 @@ knowledge-base-agent/
 │   ├── vectorstores/
 │   │   ├── __init__.py
 │   │   ├── base_store.py
-│   │   ├── pinecone_store.py
+│   │   ├── chroma_store.py 
 │   │   └── pgvector_store.py
 │   ├── retrievers/
 │   │   ├── __init__.py
@@ -190,7 +190,7 @@ knowledge-base-agent/
 │   │   ├── __init__.py
 │   │   ├── llm_factory.py
 │   │   ├── openai_llm.py
-│   │   ├── bedrock_llm.py
+│   │   ├── gemini_llm.py
 │   │   └── azure_openai_llm.py
 │   ├── tools/
 │   │   ├── __init__.py
@@ -288,10 +288,10 @@ langchain>=0.1.0
 langchain-openai>=0.1.0
 langchain-community>=0.0.20
 openai>=1.0.0
-anthropic>=0.20.0
+google-generativeai>=0.3.0
 
 # Vector Stores
-pinecone-client>=2.2.0
+chromadb>=0.4.0
 pgvector>=0.1.0
 psycopg2-binary>=2.9.0
 
@@ -368,14 +368,12 @@ supervisor>=4.2.0
 OPENAI_API_KEY=your_openai_api_key
 AZURE_OPENAI_API_KEY=your_azure_openai_key
 AZURE_OPENAI_ENDPOINT=your_azure_endpoint
-BEDROCK_ACCESS_KEY=your_bedrock_access_key
-BEDROCK_SECRET_KEY=your_bedrock_secret_key
-BEDROCK_REGION=us-east-1
+GEMINI_API_KEY=your_gemini_api_key
 
 # Vector Database Configuration
-PINECONE_API_KEY=your_pinecone_api_key
-PINECONE_ENVIRONMENT=your_pinecone_environment
-PINECONE_INDEX_NAME=knowledge-base-index
+CHROMA_HOST=localhost
+CHROMA_PORT=8000
+CHROMA_COLLECTION_NAME=knowledge-base-collection
 
 # PostgreSQL Configuration (for pgvector)
 POSTGRES_HOST=localhost
@@ -421,14 +419,12 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     azure_openai_api_key: Optional[str] = None
     azure_openai_endpoint: Optional[str] = None
-    bedrock_access_key: Optional[str] = None
-    bedrock_secret_key: Optional[str] = None
-    bedrock_region: str = "us-east-1"
+    gemini_api_key: Optional[str] = None
     
     # Vector Database Settings
-    pinecone_api_key: Optional[str] = None
-    pinecone_environment: Optional[str] = None
-    pinecone_index_name: str = "knowledge-base-index"
+    chroma_host: str = "localhost"
+    chroma_port: int = 8000
+    chroma_collection_name: str = "knowledge-base-collection"
     
     # PostgreSQL Settings
     postgres_host: str = "localhost"
@@ -472,20 +468,31 @@ class GitHubLoader:
         self.github_token = github_token
         
     def load_repository(self, repo_url: str) -> List[Dict]:
-        """Load documents from GitHub repository"""
+        """Load documents from GitHub repository using GitHub MCP tool"""
+        # Use GitHub MCP tool for enhanced repository access
+        # This integrates with the Model Context Protocol for GitHub
+        
         # Clone repository temporarily
         clone_path = f"/tmp/{repo_url.split('/')[-1]}"
         os.system(f"git clone {repo_url} {clone_path}")
         
-        # Load code files
+        # Load code files using GitHub MCP enhanced parser
         loader = GenericLoader.from_filesystem(
             clone_path,
             glob="**/*",
-            suffixes=[".py", ".js", ".ts", ".java", ".cpp", ".c", ".h"],
+            suffixes=[".py", ".js", ".ts", ".java", ".cpp", ".c", ".h", ".md", ".txt"],
             parser=LanguageParser(language=Language.PYTHON, parser_threshold=500)
         )
         
         documents = loader.load()
+        
+        # Enhanced metadata extraction using GitHub MCP
+        for doc in documents:
+            doc.metadata.update({
+                "source": "github_mcp",
+                "repository": repo_url,
+                "loader_type": "github_mcp_enhanced"
+            })
         
         # Clean up
         os.system(f"rm -rf {clone_path}")
@@ -555,7 +562,176 @@ class BaseVectorStore(ABC):
         pass
 ```
 
-#### 3.5 RAG Agent
+#### 3.4 Chroma Vector Store Implementation
+```python
+# src/vectorstores/chroma_store.py
+from langchain.vectorstores import Chroma
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.schema import Document
+from typing import List, Dict, Any, Optional
+import chromadb
+from chromadb.config import Settings as ChromaSettings
+
+class ChromaStore(BaseVectorStore):
+    def __init__(self, 
+                 collection_name: str = "knowledge-base-collection",
+                 host: str = "localhost",
+                 port: int = 8000,
+                 embedding_function = None):
+        self.collection_name = collection_name
+        self.host = host
+        self.port = port
+        
+        # Initialize Chroma client
+        self.client = chromadb.HttpClient(
+            host=host,
+            port=port,
+            settings=ChromaSettings(allow_reset=True)
+        )
+        
+        # Set up embedding function
+        self.embedding_function = embedding_function or OpenAIEmbeddings()
+        
+        # Initialize Chroma vector store
+        self.vector_store = Chroma(
+            client=self.client,
+            collection_name=collection_name,
+            embedding_function=self.embedding_function
+        )
+    
+    def add_documents(self, documents: List[Document]) -> List[str]:
+        """Add documents to Chroma vector store"""
+        try:
+            ids = self.vector_store.add_documents(documents)
+            return ids
+        except Exception as e:
+            raise Exception(f"Failed to add documents to Chroma: {str(e)}")
+    
+    def similarity_search(self, query: str, k: int = 5) -> List[Document]:
+        """Perform similarity search in Chroma"""
+        try:
+            results = self.vector_store.similarity_search(query, k=k)
+            return results
+        except Exception as e:
+            raise Exception(f"Failed to perform similarity search: {str(e)}")
+    
+    def delete_documents(self, ids: List[str]) -> bool:
+        """Delete documents from Chroma"""
+        try:
+            self.vector_store.delete(ids)
+            return True
+        except Exception as e:
+            raise Exception(f"Failed to delete documents: {str(e)}")
+    
+    def get_collection_info(self) -> Dict[str, Any]:
+        """Get information about the collection"""
+        try:
+            collection = self.client.get_collection(self.collection_name)
+            return {
+                "name": collection.name,
+                "count": collection.count(),
+                "metadata": collection.metadata
+            }
+        except Exception as e:
+            return {"error": f"Failed to get collection info: {str(e)}"}
+```
+
+#### 3.5 LLM Implementations
+```python
+# src/llm/gemini_llm.py
+import google.generativeai as genai
+from typing import Dict, Any, Optional, List
+from langchain.llms.base import LLM
+from langchain.callbacks.manager import CallbackManagerForLLMRun
+
+class GeminiLLM(LLM):
+    """Gemini LLM implementation for LangChain"""
+    
+    def __init__(self, api_key: str, model_name: str = "gemini-pro"):
+        genai.configure(api_key=api_key)
+        self.model_name = model_name
+        self.model = genai.GenerativeModel(model_name)
+    
+    @property
+    def _llm_type(self) -> str:
+        return "gemini"
+    
+    def _call(
+        self,
+        prompt: str,
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> str:
+        """Call Gemini API"""
+        try:
+            generation_config = genai.types.GenerationConfig(
+                temperature=kwargs.get("temperature", 0.7),
+                max_output_tokens=kwargs.get("max_tokens", 1000),
+                top_p=kwargs.get("top_p", 0.9),
+                top_k=kwargs.get("top_k", 40)
+            )
+            
+            response = self.model.generate_content(
+                prompt,
+                generation_config=generation_config
+            )
+            
+            return response.text
+            
+        except Exception as e:
+            raise Exception(f"Gemini API call failed: {str(e)}")
+    
+    @property
+    def _identifying_params(self) -> Dict[str, Any]:
+        """Get the identifying parameters."""
+        return {"model_name": self.model_name}
+
+# src/llm/llm_factory.py
+from typing import Dict, Any, Optional
+from .openai_llm import OpenAILLM
+from .gemini_llm import GeminiLLM
+from .azure_openai_llm import AzureOpenAILLM
+
+class LLMFactory:
+    """Factory class to create LLM instances based on provider"""
+    
+    @staticmethod
+    def create_llm(provider: str, config: Dict[str, Any]) -> Any:
+        """Create LLM instance based on provider"""
+        
+        if provider.lower() == "openai":
+            return OpenAILLM(
+                api_key=config.get("openai_api_key"),
+                model=config.get("model", "gpt-4-turbo-preview"),
+                temperature=config.get("temperature", 0.7),
+                max_tokens=config.get("max_tokens", 4000)
+            )
+        
+        elif provider.lower() == "gemini":
+            return GeminiLLM(
+                api_key=config.get("gemini_api_key"),
+                model_name=config.get("model", "gemini-pro")
+            )
+        
+        elif provider.lower() == "azure_openai":
+            return AzureOpenAILLM(
+                api_key=config.get("azure_openai_api_key"),
+                endpoint=config.get("azure_openai_endpoint"),
+                model=config.get("model", "gpt-4"),
+                temperature=config.get("temperature", 0.7)
+            )
+        
+        else:
+            raise ValueError(f"Unsupported LLM provider: {provider}")
+    
+    @staticmethod
+    def get_supported_providers() -> List[str]:
+        """Get list of supported LLM providers"""
+        return ["openai", "gemini", "azure_openai"]
+```
+
+#### 3.6 RAG Agent
 ```python
 # src/agents/rag_agent.py
 from langchain.chains import RetrievalQA
@@ -613,6 +789,167 @@ class RAGAgent:
                 "source_documents": [],
                 "status": "error",
                 "error": str(e)
+            }
+```
+
+### 3.6 GitHub MCP Tool Integration
+```python
+# src/tools/github_mcp_tool.py
+from typing import Dict, Any, List, Optional
+import requests
+import json
+from langchain.tools import BaseTool
+
+class GitHubMCPTool(BaseTool):
+    """GitHub Model Context Protocol (MCP) Tool for enhanced repository access"""
+    
+    name = "github_mcp"
+    description = "Tool for accessing GitHub repositories using Model Context Protocol"
+    
+    def __init__(self, github_token: str, mcp_server_url: Optional[str] = None):
+        super().__init__()
+        self.github_token = github_token
+        self.mcp_server_url = mcp_server_url or "http://localhost:8080/mcp"
+        self.headers = {
+            "Authorization": f"token {github_token}",
+            "Content-Type": "application/json"
+        }
+    
+    def _run(self, repo_url: str, action: str = "index", **kwargs) -> str:
+        """Execute GitHub MCP tool action"""
+        try:
+            if action == "index":
+                return self._index_repository(repo_url, **kwargs)
+            elif action == "search":
+                return self._search_repository(repo_url, kwargs.get("query", ""), **kwargs)
+            elif action == "get_structure":
+                return self._get_repository_structure(repo_url, **kwargs)
+            else:
+                return f"Unsupported action: {action}"
+        except Exception as e:
+            return f"Error executing GitHub MCP tool: {str(e)}"
+    
+    def _index_repository(self, repo_url: str, **kwargs) -> str:
+        """Index a GitHub repository using MCP"""
+        payload = {
+            "action": "index_repository",
+            "repository_url": repo_url,
+            "include_files": kwargs.get("include_files", [".py", ".js", ".ts", ".md", ".txt"]),
+            "exclude_patterns": kwargs.get("exclude_patterns", ["node_modules/", ".git/", "__pycache__/"]),
+            "max_file_size": kwargs.get("max_file_size", 1000000),  # 1MB
+            "extract_metadata": True
+        }
+        
+        response = requests.post(
+            f"{self.mcp_server_url}/github/index",
+            headers=self.headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return f"Successfully indexed {result.get('files_processed', 0)} files from {repo_url}"
+        else:
+            return f"Failed to index repository: {response.text}"
+    
+    def _search_repository(self, repo_url: str, query: str, **kwargs) -> str:
+        """Search within a GitHub repository using MCP"""
+        payload = {
+            "action": "search_repository",
+            "repository_url": repo_url,
+            "query": query,
+            "search_type": kwargs.get("search_type", "semantic"),  # semantic, keyword, or hybrid
+            "max_results": kwargs.get("max_results", 10)
+        }
+        
+        response = requests.post(
+            f"{self.mcp_server_url}/github/search",
+            headers=self.headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            results = response.json()
+            return json.dumps(results, indent=2)
+        else:
+            return f"Failed to search repository: {response.text}"
+    
+    def _get_repository_structure(self, repo_url: str, **kwargs) -> str:
+        """Get repository structure using MCP"""
+        payload = {
+            "action": "get_structure",
+            "repository_url": repo_url,
+            "max_depth": kwargs.get("max_depth", 3),
+            "include_metadata": kwargs.get("include_metadata", True)
+        }
+        
+        response = requests.post(
+            f"{self.mcp_server_url}/github/structure",
+            headers=self.headers,
+            json=payload
+        )
+        
+        if response.status_code == 200:
+            structure = response.json()
+            return json.dumps(structure, indent=2)
+        else:
+            return f"Failed to get repository structure: {response.text}"
+
+# Integration with RAG Agent
+class MCPEnhancedRAGAgent(RAGAgent):
+    """RAG Agent enhanced with GitHub MCP capabilities"""
+    
+    def __init__(self, llm, vectorstore, github_token: str, **kwargs):
+        super().__init__(llm, vectorstore, **kwargs)
+        self.github_mcp_tool = GitHubMCPTool(github_token)
+    
+    def index_github_repository(self, repo_url: str, **kwargs) -> Dict[str, Any]:
+        """Index GitHub repository using MCP tool"""
+        try:
+            # Use MCP tool to index repository
+            result = self.github_mcp_tool._run(repo_url, action="index", **kwargs)
+            
+            # Load documents using enhanced GitHub loader
+            github_loader = GitHubLoader(self.github_mcp_tool.github_token)
+            documents = github_loader.load_repository(repo_url)
+            
+            # Process and add to vector store
+            processed_docs = self.text_processor.process_documents(documents)
+            doc_ids = self.vectorstore.add_documents(processed_docs)
+            
+            return {
+                "status": "success",
+                "message": result,
+                "documents_indexed": len(doc_ids),
+                "document_ids": doc_ids
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to index repository: {str(e)}"
+            }
+    
+    def query_with_mcp_context(self, question: str, repo_context: str = None) -> Dict[str, Any]:
+        """Query with additional MCP context"""
+        try:
+            # Enhanced query with MCP context
+            if repo_context:
+                enhanced_question = f"Context from repository {repo_context}: {question}"
+            else:
+                enhanced_question = question
+            
+            # Use parent query method
+            result = super().query(enhanced_question)
+            
+            # Add MCP metadata
+            result["mcp_enhanced"] = True
+            result["repository_context"] = repo_context
+            
+            return result
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"MCP-enhanced query failed: {str(e)}"
             }
 ```
 
@@ -692,6 +1029,17 @@ services:
     depends_on:
       - postgres
       - redis
+      - chroma
+
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+    volumes:
+      - chroma_data:/chroma/chroma
 
   postgres:
     image: pgvector/pgvector:pg15
@@ -711,6 +1059,7 @@ services:
 
 volumes:
   postgres_data:
+  chroma_data:
 ```
 
 ### 6. Observability and Monitoring
@@ -1706,15 +2055,17 @@ DATABASE_URL=postgresql://user:password@localhost:5432/knowledge_base
 REDIS_URL=redis://localhost:6379/0
 
 # Vector Store Configuration
-VECTOR_STORE_TYPE=pinecone  # or pgvector
-PINECONE_API_KEY=your_key
-PINECONE_ENVIRONMENT=us-west1-gcp-free
-PINECONE_INDEX_NAME=knowledge-base
+VECTOR_STORE_TYPE=chroma  # or pgvector
+CHROMA_HOST=localhost
+CHROMA_PORT=8000
+CHROMA_COLLECTION_NAME=knowledge-base
 
 # LLM Configuration
 DEFAULT_LLM_PROVIDER=openai
 OPENAI_API_KEY=your_key
 OPENAI_MODEL=gpt-4-turbo-preview
+GEMINI_API_KEY=your_key
+GEMINI_MODEL=gemini-pro
 AZURE_OPENAI_API_KEY=your_key
 AZURE_OPENAI_ENDPOINT=https://your-endpoint.openai.azure.com/
 
@@ -1756,7 +2107,7 @@ JAEGER_ENDPOINT=http://localhost:14268/api/traces
 2. **Vector Store Issues**
    ```bash
    # Test vector store connection
-   python -c "from src.vectorstores.pinecone_store import PineconeStore; print('Vector store OK')"
+   python -c "from src.vectorstores.chroma_store import ChromaStore; print('Vector store OK')"
    
    # Clear vector store
    python scripts/clear_vector_store.py
