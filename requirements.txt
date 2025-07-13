@@ -1,0 +1,39 @@
+# Core Framework
+langchain>=0.1.0
+langchain-openai>=0.1.0
+langchain-community>=0.0.20
+openai>=1.0.0
+google-generativeai>=0.3.0
+
+# Vector Stores
+chromadb>=0.4.0
+pgvector>=0.1.0
+psycopg2-binary>=2.9.0
+
+# Document Processing
+pypdf>=3.17.0
+python-docx>=0.8.11
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# Text Processing
+tiktoken>=0.5.0
+sentence-transformers>=2.2.0
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+
+# Database
+sqlalchemy>=2.0.0
+redis>=5.0.0
+
+# GitHub Integration
+pygithub>=1.59.0
+gitpython>=3.1.0
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.31.0
+aiofiles>=23.2.0

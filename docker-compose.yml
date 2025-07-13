@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  knowledge-base-agent:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=development
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+    env_file:
+      - .env
+    depends_on:
+      - chroma
+    volumes:
+      - ./logs:/app/logs
+
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+    volumes:
+      - chroma_data:/chroma/chroma
+
+  # Optional: Add a simple web UI for development
+  ui:
+    build: ./ui
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - knowledge-base-agent
+
+volumes:
+  chroma_data:
