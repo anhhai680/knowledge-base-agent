@@ -1,12 +1,10 @@
-version: '3.8'
-
 services:
   knowledge-base-agent:
     build: .
     ports:
       - "8000:8000"
     environment:
-      - APP_ENV=development
+      - APP_ENV=production
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
     env_file:
@@ -15,6 +13,7 @@ services:
       - chroma
     volumes:
       - ./logs:/app/logs
+    restart: unless-stopped
 
   chroma:
     image: chromadb/chroma:latest

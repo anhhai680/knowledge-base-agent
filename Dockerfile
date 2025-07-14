@@ -21,12 +21,20 @@ COPY src/ ./src/
 COPY main.py .
 COPY verify_startup.py .
 
+# Copy entrypoint script
+COPY entrypoint.sh .
+RUN chmod +x /app/entrypoint.sh
+
 # Create directory for Chroma persistence
 RUN mkdir -p ./chroma_db
 
-# Create a simple entrypoint script for better error handling
-RUN echo '#!/bin/bash\nset -e\necho "Starting Knowledge Base Agent..."\npython verify_startup.py\nif [ $? -eq 0 ]; then\n    echo "Verification passed, starting application..."\n    exec python main.py\nelse\n    echo "Verification failed, exiting..."\n    exit 1\nfi' > /app/entrypoint.sh && \
-    chmod +x /app/entrypoint.sh
+# Set default environment variables
+ENV APP_ENV=production
+ENV LOG_LEVEL=INFO
+ENV API_HOST=0.0.0.0
+ENV API_PORT=8000
+ENV CHROMA_HOST=localhost
+ENV CHROMA_PORT=8000
 
 # Expose port
 EXPOSE 8000

@@ -85,14 +85,21 @@ def main():
     print("🚀 Knowledge Base Agent - Startup Verification")
     print("=" * 50)
     
-    verify_environment()
-    verify_dependencies()
-    
-    if verify_imports():
-        print("\n✅ All verifications passed! Application should start successfully.")
-        return 0
-    else:
-        print("\n❌ Verification failed! Please check the errors above.")
+    try:
+        verify_environment()
+        verify_dependencies()
+        
+        if verify_imports():
+            print("\n✅ All verifications passed! Application should start successfully.")
+            return 0
+        else:
+            print("\n❌ Verification failed! Please check the errors above.")
+            return 1
+            
+    except Exception as e:
+        print(f"\n💥 Unexpected error during verification: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 if __name__ == "__main__":

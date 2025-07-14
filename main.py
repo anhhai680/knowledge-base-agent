@@ -13,25 +13,35 @@ from src.utils.logging import setup_logging, get_logger
 
 def main():
     """Main application entry point"""
-    # Setup logging
-    setup_logging(settings.log_level)
-    logger = get_logger(__name__)
+    try:
+        # Setup logging
+        setup_logging(settings.log_level)
+        logger = get_logger(__name__)
+        
+        logger.info("Starting Knowledge Base Agent...")
+        logger.info(f"Environment: {settings.app_env}")
+        logger.info(f"API will be available at: http://{settings.api_host}:{settings.api_port}")
+        
+        # Import app after settings are loaded
+        from src.api.routes import app
+        
+        # Run the application
+        uvicorn.run(
+            app,
+            host=settings.api_host,
+            port=settings.api_port,
+            reload=settings.app_env == "development",
+            log_level=settings.log_level.lower()
+        )
+        
+    except Exception as e:
+        print(f"💥 Failed to start application: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
     
-    logger.info("Starting Knowledge Base Agent...")
-    logger.info(f"Environment: {settings.app_env}")
-    logger.info(f"API will be available at: http://{settings.api_host}:{settings.api_port}")
-    
-    # Import app after settings are loaded
-    from src.api.routes import app
-    
-    # Run the application
-    uvicorn.run(
-        app,
-        host=settings.api_host,
-        port=settings.api_port,
-        reload=settings.app_env == "development",
-        log_level=settings.log_level.lower()
-    )
+    return 0
 
 if __name__ == "__main__":
-    main()
+    import sys
+    sys.exit(main())

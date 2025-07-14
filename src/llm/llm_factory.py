@@ -16,22 +16,26 @@ class LLMFactory:
             if not config.get("openai_api_key"):
                 raise ValueError("OpenAI API key is required")
             
-            return OpenAILLM(
+            llm_wrapper = OpenAILLM(
                 api_key=config.get("openai_api_key"),
                 model=config.get("model", "gpt-4o-mini"),
                 temperature=config.get("temperature", 0.7),
                 max_tokens=config.get("max_tokens", 4000)
             )
+            # Return the actual LangChain LLM object
+            return llm_wrapper.get_llm()
         
         elif provider.lower() == "gemini":
             if not config.get("gemini_api_key"):
                 raise ValueError("Gemini API key is required")
             
-            return GeminiLLM(
+            llm_wrapper = GeminiLLM(
                 api_key=config.get("gemini_api_key"),
                 model_name=config.get("model", "gemini-pro"),
                 temperature=config.get("temperature", 0.7)
             )
+            # Return the actual LangChain LLM object
+            return llm_wrapper.get_llm()
         
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")

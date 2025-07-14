@@ -25,6 +25,10 @@ class OpenAILLM:
             logger.error(f"Failed to initialize OpenAI LLM: {str(e)}")
             raise
     
+    def get_llm(self):
+        """Get the underlying LangChain LLM object"""
+        return self.llm
+    
     def invoke(self, prompt: str) -> str:
         """Invoke the LLM with a prompt"""
         try:

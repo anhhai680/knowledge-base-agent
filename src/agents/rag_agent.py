@@ -2,6 +2,8 @@ from typing import Dict, Any, List
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.docstore.document import Document
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -38,13 +40,28 @@ Answer:
         )
         
         try:
-            return RetrievalQA.from_chain_type(
-                llm=self.llm,
-                chain_type="stuff",
-                retriever=self.vectorstore.as_retriever(**self.retriever_kwargs),
-                return_source_documents=True,
-                chain_type_kwargs={"prompt": prompt}
-            )
+            # Use the new LangChain approach first, fall back to legacy if needed
+            try:
+                return RetrievalQA.from_chain_type(
+                    llm=self.llm,
+                    chain_type="stuff",
+                    retriever=self.vectorstore.as_retriever(**self.retriever_kwargs),
+                    return_source_documents=True,
+                    chain_type_kwargs={"prompt": prompt}
+                )
+            except Exception as e:
+                logger.warning(f"Failed to create QA chain with new approach: {str(e)}")
+                # Alternative approach using create_retrieval_chain if available
+                from langchain.chains.combine_documents import create_stuff_documents_chain
+                from langchain.chains import create_retrieval_chain
+                
+                document_chain = create_stuff_documents_chain(self.llm, prompt)
+                retrieval_chain = create_retrieval_chain(
+                    self.vectorstore.as_retriever(**self.retriever_kwargs), 
+                    document_chain
+                )
+                return retrieval_chain
+                
         except Exception as e:
             logger.error(f"Failed to create QA chain: {str(e)}")
             raise
@@ -54,22 +71,45 @@ Answer:
         logger.info(f"Processing query: {question[:100]}...")
         
         try:
-            result = self.qa_chain({"query": question})
-            
-            # Format source documents
-            source_docs = []
-            for doc in result.get("source_documents", []):
-                source_docs.append({
-                    "content": doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content,
-                    "metadata": doc.metadata
-                })
-            
-            response = {
-                "answer": result["result"],
-                "source_documents": source_docs,
-                "status": "success",
-                "num_sources": len(source_docs)
-            }
+            # Handle both legacy and new chain formats
+            if hasattr(self.qa_chain, '__call__'):
+                # Legacy RetrievalQA format
+                result = self.qa_chain({"query": question})
+                
+                # Format source documents
+                source_docs = []
+                for doc in result.get("source_documents", []):
+                    source_docs.append({
+                        "content": doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content,
+                        "metadata": doc.metadata
+                    })
+                
+                response = {
+                    "answer": result["result"],
+                    "source_documents": source_docs,
+                    "status": "success",
+                    "num_sources": len(source_docs)
+                }
+            else:
+                # New chain format
+                result = self.qa_chain.invoke({"input": question})
+                
+                # Format source documents
+                source_docs = []
+                context_docs = result.get("context", [])
+                if context_docs:
+                    for doc in context_docs:
+                        source_docs.append({
+                            "content": doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content,
+                            "metadata": doc.metadata
+                        })
+                
+                response = {
+                    "answer": result["answer"],
+                    "source_documents": source_docs,
+                    "status": "success",
+                    "num_sources": len(source_docs)
+                }
             
             logger.info(f"Query processed successfully with {len(source_docs)} source documents")
             return response
