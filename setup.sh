@@ -41,13 +41,18 @@ if [ ! -f .env ]; then
     echo "   - GITHUB_TOKEN (required for private repositories)"
 fi
 
+# Test API connections
+echo "🧪 Testing API connections..."
+python3 test_apis.py
+
 echo ""
 echo "✅ Setup complete!"
 echo ""
 echo "Next steps:"
-echo "1. Edit .env file with your API keys"
+echo "1. Edit .env file with your API keys if needed"
 echo "2. Run: source venv/bin/activate"
-echo "3. Run: python main.py"
+echo "3. For Docker: docker-compose up --build"
+echo "4. For local: python main.py"
 echo ""
 echo "Or use Docker:"
 echo "1. Edit .env file with your API keys"

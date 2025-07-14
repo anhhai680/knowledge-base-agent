@@ -20,6 +20,8 @@ lxml>=4.9.0
 # Text Processing
 tiktoken>=0.5.0
 sentence-transformers>=2.2.0
+transformers>=4.21.0
+torch>=1.11.0
 
 # Web Framework
 fastapi>=0.104.0

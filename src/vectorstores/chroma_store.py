@@ -1,9 +1,9 @@
 from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
 from langchain.schema import Document
 from typing import List, Dict, Any, Optional
 import chromadb
 from .base_store import BaseVectorStore
+from ..llm.embedding_factory import get_embedding_function
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -21,7 +21,7 @@ class ChromaStore(BaseVectorStore):
         self.port = port
         
         # Set up embedding function
-        self.embedding_function = embedding_function or OpenAIEmbeddings()
+        self.embedding_function = embedding_function or get_embedding_function()
         
         try:
             # Initialize Chroma client
