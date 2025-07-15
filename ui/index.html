@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Base Agent</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background-color: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background-color: #2563eb;
+            color: white;
+            padding: 1rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .container {
+            display: flex;
+            flex: 1;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .sidebar {
+            width: 300px;
+            background-color: white;
+            padding: 1rem;
+            border-right: 1px solid #e5e7eb;
+            overflow-y: auto;
+        }
+
+        .main-chat {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: white;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 1rem;
+            overflow-y: auto;
+            max-height: calc(100vh - 200px);
+        }
+
+        .message {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+
+        .message.user {
+            background-color: #dbeafe;
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .message.assistant {
+            background-color: #f3f4f6;
+        }
+
+        .message.error {
+            background-color: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #dc2626;
+        }
+
+        .chat-input {
+            padding: 1rem;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .input-group input {
+            flex: 1;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+
+        .input-group button {
+            padding: 0.75rem 1.5rem;
+            background-color: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .input-group button:hover {
+            background-color: #1d4ed8;
+        }
+
+        .input-group button:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .repo-section {
+            margin-bottom: 1.5rem;
+        }
+
+        .repo-section h3 {
+            margin-bottom: 0.5rem;
+            color: #374151;
+        }
+
+        .repo-input {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .repo-input input {
+            flex: 1;
+            padding: 0.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .repo-input button {
+            padding: 0.5rem 1rem;
+            background-color: #10b981;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .repo-list {
+            list-style: none;
+        }
+
+        .repo-item {
+            padding: 0.5rem;
+            margin-bottom: 0.25rem;
+            background-color: #f9fafb;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .repo-status {
+            display: inline-block;
+            padding: 0.125rem 0.5rem;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-completed { background-color: #d1fae5; color: #065f46; }
+        .status-indexing { background-color: #fef3c7; color: #92400e; }
+        .status-failed { background-color: #fee2e2; color: #991b1b; }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #2563eb;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .source-docs {
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background-color: #f8fafc;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .source-docs summary {
+            cursor: pointer;
+            font-weight: bold;
+            color: #4b5563;
+        }
+
+        .source-doc {
+            margin: 0.5rem 0;
+            padding: 0.5rem;
+            background-color: white;
+            border-radius: 4px;
+            border-left: 3px solid #2563eb;
+        }
+
+        .source-meta {
+            font-size: 11px;
+            color: #6b7280;
+            margin-bottom: 0.25rem;
+        }
+
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Knowledge Base Agent</h1>
+        <p>Ask questions about your indexed GitHub repositories</p>
+    </div>
+
+    <div class="container">
+        <div class="sidebar">
+            <div class="repo-section">
+                <h3>Add Repository</h3>
+                <div class="repo-input">
+                    <input type="text" id="repoUrl" placeholder="https://github.com/user/repo">
+                    <button onclick="addRepository()">Add</button>
+                </div>
+            </div>
+
+            <div class="repo-section">
+                <h3>Indexed Repositories</h3>
+                <ul id="repoList" class="repo-list">
+                    <li class="repo-item">No repositories indexed yet</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="main-chat">
+            <div class="chat-messages" id="chatMessages">
+                <div class="message assistant">
+                    <strong>Assistant:</strong> Hello! I'm your Knowledge Base Agent. Add some GitHub repositories using the sidebar, then ask me questions about your code!
+                </div>
+            </div>
+
+            <div class="chat-input">
+                <div class="input-group">
+                    <input type="text" id="questionInput" placeholder="Ask a question about your code..." onkeypress="handleKeyPress(event)">
+                    <button onclick="askQuestion()" id="askButton">Ask</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        
+        async function addRepository() {
+            const repoUrl = document.getElementById('repoUrl').value.trim();
+            if (!repoUrl) {
+                alert('Please enter a repository URL');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/index`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        repository_urls: [repoUrl],
+                        branch: 'main'
+                    })
+                });
+
+                if (response.ok) {
+                    document.getElementById('repoUrl').value = '';
+                    addMessage('system', `Started indexing repository: ${repoUrl}`);
+                    loadRepositories();
+                } else {
+                    const error = await response.text();
+                    addMessage('error', `Failed to index repository: ${error}`);
+                }
+            } catch (error) {
+                addMessage('error', `Error: ${error.message}`);
+            }
+        }
+
+        async function askQuestion() {
+            const question = document.getElementById('questionInput').value.trim();
+            if (!question) return;
+
+            const askButton = document.getElementById('askButton');
+            const originalText = askButton.textContent;
+            
+            // Disable button and show loading
+            askButton.disabled = true;
+            askButton.innerHTML = '<span class="loading"></span>';
+
+            // Add user message
+            addMessage('user', question);
+            document.getElementById('questionInput').value = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/query`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        question: question,
+                        max_results: 5
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    addMessage('assistant', data.answer, data.source_documents);
+                } else {
+                    addMessage('error', `Error: ${data.detail || 'Unknown error'}`);
+                }
+            } catch (error) {
+                addMessage('error', `Error: ${error.message}`);
+            } finally {
+                // Re-enable button
+                askButton.disabled = false;
+                askButton.textContent = originalText;
+            }
+        }
+
+        function addMessage(type, content, sources = null) {
+            const messagesDiv = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            let messageContent = `<strong>${type === 'user' ? 'You' : type === 'error' ? 'Error' : type === 'system' ? 'System' : 'Assistant'}:</strong> ${content}`;
+            
+            // Add source documents if available
+            if (sources && sources.length > 0) {
+                messageContent += '<div class="source-docs">';
+                messageContent += `<details><summary>Sources (${sources.length})</summary>`;
+                sources.forEach((source, index) => {
+                    messageContent += `<div class="source-doc">`;
+                    messageContent += `<div class="source-meta">File: ${source.metadata.file_path || 'Unknown'} | Repository: ${source.metadata.repository || 'Unknown'}</div>`;
+                    messageContent += `<pre>${source.content}</pre>`;
+                    messageContent += `</div>`;
+                });
+                messageContent += '</details></div>';
+            }
+            
+            messageDiv.innerHTML = messageContent;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        async function loadRepositories() {
+            try {
+                const response = await fetch(`${API_BASE}/repositories`);
+                const repositories = await response.json();
+                
+                const repoList = document.getElementById('repoList');
+                
+                if (repositories.length === 0) {
+                    repoList.innerHTML = '<li class="repo-item">No repositories indexed yet</li>';
+                } else {
+                    repoList.innerHTML = repositories.map(repo => `
+                        <li class="repo-item">
+                            <div>${repo.url}</div>
+                            <span class="repo-status status-${repo.status}">${repo.status}</span>
+                            <small>(${repo.documents_count} docs)</small>
+                        </li>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Failed to load repositories:', error);
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                askQuestion();
+            }
+        }
+
+        // Load repositories on page load
+        loadRepositories();
+        
+        // Refresh repositories every 30 seconds to update status
+        setInterval(loadRepositories, 30000);
+    </script>
+</body>
+</html>
