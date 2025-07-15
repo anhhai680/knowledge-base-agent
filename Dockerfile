@@ -30,12 +30,12 @@ RUN chmod +x /app/entrypoint.sh
 RUN mkdir -p ./chroma_db
 
 # Set default environment variables
-ENV APP_ENV=development
+ENV APP_ENV=production
 ENV LLM_PROVIDER=ollama
-ENV LLM_MODEL=llama3.1:8b
-ENV LLM_API_BASE_URL=http://ollama:11434/v1
+ENV LLM_MODEL=llama3.2:3b
+ENV LLM_API_BASE_URL=http://ollama:11434
 ENV EMBEDDING_MODEL=nomic-embed-text
-ENV EMBEDDING_API_BASE_URL=http://ollama:11434/v1/embeddings
+ENV EMBEDDING_API_BASE_URL=http://ollama:11434
 ENV LOG_LEVEL=INFO
 ENV API_HOST=0.0.0.0
 ENV API_PORT=8000
@@ -44,7 +44,7 @@ ENV CHROMA_PORT=8000
 ENV CHUNK_SIZE=1000
 ENV CHUNK_OVERLAP=200
 ENV MAX_TOKENS=4000
-ENV TEMPERATURE=0.7
+ENV TEMPERATURE=0.8
 
 # Expose port
 EXPOSE 8000
