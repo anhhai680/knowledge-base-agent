@@ -6,7 +6,6 @@ Startup verification script for Knowledge Base Agent
 import sys
 import os
 import time
-import asyncio
 import traceback
 sys.path.insert(0, '/app' if '/app' in sys.path else '.')
 
