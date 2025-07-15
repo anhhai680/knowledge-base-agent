@@ -4,15 +4,44 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - APP_ENV=production
+      - APP_ENV=${APP_ENV:-development}
+      - DOCKER_CONTAINER=true
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-llama3.1:8b}
+      - LLM_API_BASE_URL=${LLM_API_BASE_URL:-http://ollama:11434/v1}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-embed-text}
+      - EMBEDDING_API_BASE_URL=${EMBEDDING_API_BASE_URL:-http://ollama:11434/v1/embeddings}
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITHUB_REPOS=${GITHUB_REPOS:-[]}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
+      - MAX_TOKENS=${MAX_TOKENS:-4000}
+      - TEMPERATURE=${TEMPERATURE:-0.7}
     env_file:
       - .env
     depends_on:
       - chroma
+      - ollama
     volumes:
       - ./logs:/app/logs
+      - ./chroma_db:/app/chroma_db
+    restart: unless-stopped
+  
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0  # Optional, if your Ollama instance requires authentication
+    volumes:
+      - ollama_data:/ollama/data
     restart: unless-stopped
 
   chroma:
@@ -22,6 +51,7 @@ services:
     environment:
       - CHROMA_SERVER_HOST=0.0.0.0
       - CHROMA_SERVER_HTTP_PORT=8000
+      - ANONYMIZED_TELEMETRY=${ANONYMIZED_TELEMETRY:-TRUE}
     volumes:
       - chroma_data:/chroma/chroma
     restart: unless-stopped
@@ -38,3 +68,4 @@ services:
 
 volumes:
   chroma_data:
+  ollama_data:

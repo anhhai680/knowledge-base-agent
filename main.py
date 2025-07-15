@@ -7,6 +7,7 @@ This is the MVP implementation of the Knowledge Base Agent that can:
 3. Provide a REST API for interactions
 """
 
+import os
 import uvicorn
 from src.config.settings import settings
 from src.utils.logging import setup_logging, get_logger
@@ -26,11 +27,14 @@ def main():
         from src.api.routes import app
         
         # Run the application
+        # Disable reload in containerized environments to prevent restart loops
+        use_reload = settings.app_env == "development" and not os.getenv("DOCKER_CONTAINER", False)
+        
         uvicorn.run(
             app,
             host=settings.api_host,
             port=settings.api_port,
-            reload=settings.app_env == "development",
+            reload=use_reload,
             log_level=settings.log_level.lower()
         )
         
