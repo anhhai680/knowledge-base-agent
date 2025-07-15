@@ -6,10 +6,26 @@ An AI-powered knowledge base agent that can index GitHub repositories and answer
 
 - **GitHub Repository Indexing**: Automatically index code from GitHub repositories
 - **Intelligent Q&A**: Ask questions about your codebase and get accurate answers
-- **Multiple LLM Support**: Works with OpenAI GPT and Google Gemini
+- **Multiple LLM Support**: Works with OpenAI GPT, Google Gemini, Azure OpenAI, and Ollama
+- **Multiple Embedding Models**: Support for OpenAI, Gemini, Ollama, and HuggingFace embeddings
+- **Easy Model Switching**: Simple configuration system for changing models
 - **Vector Search**: Uses Chroma for efficient semantic search
 - **REST API**: Full-featured API for integration
 - **Web UI**: Simple web interface for chatting with your code
+
+## Supported Models
+
+### LLM Providers
+- **OpenAI**: GPT-4o, GPT-4o-mini, GPT-3.5-turbo, etc.
+- **Gemini**: Gemini-1.5-pro, Gemini-1.5-flash, Gemini-pro
+- **Azure OpenAI**: Azure-hosted OpenAI models
+- **Ollama**: Local models (Llama3.1, Mistral, CodeLlama, etc.)
+
+### Embedding Providers
+- **OpenAI**: text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002
+- **Gemini**: models/embedding-001
+- **Ollama**: nomic-embed-text, all-minilm, mxbai-embed-large
+- **HuggingFace**: sentence-transformers models (fallback)
 
 ## Quick Start
 
@@ -34,7 +50,30 @@ An AI-powered knowledge base agent that can index GitHub repositories and answer
    # Edit .env with your API keys and configuration
    ```
 
-3. **Install dependencies**
+3. **Configure your models**
+   ```bash
+   cp .env.sample .env
+   # Edit .env with your preferred LLM and embedding models
+   
+   # Quick examples:
+   # For OpenAI: LLM_PROVIDER=openai, LLM_MODEL=gpt-4o-mini
+   # For Ollama: LLM_PROVIDER=ollama, LLM_MODEL=llama3.1:8b
+   # For Gemini: LLM_PROVIDER=gemini, LLM_MODEL=gemini-1.5-flash
+   ```
+
+   Or use the model switching utility:
+   ```bash
+   # Switch to Ollama (local)
+   python switch_models.py switch ollama --llm-model llama3.1:8b --embedding-model nomic-embed-text
+   
+   # Switch to OpenAI
+   python switch_models.py switch openai --llm-model gpt-4o-mini --llm-api-key your-key
+   
+   # Check current configuration
+   python switch_models.py show
+   ```
+
+4. **Install dependencies**
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -121,6 +160,60 @@ CHROMA_PORT=8000
 CHUNK_SIZE=1000
 CHUNK_OVERLAP=200
 TEMPERATURE=0.7
+```
+
+## Configuration
+
+### Model Configuration
+
+The Knowledge Base Agent supports multiple LLM and embedding providers. See [MODEL_CONFIGURATION.md](docs/MODEL_CONFIGURATION.md) for detailed configuration instructions.
+
+**Quick Configuration Examples:**
+
+```bash
+# OpenAI Configuration
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+EMBEDDING_MODEL=text-embedding-3-small
+OPENAI_API_KEY=your-openai-key
+
+# Ollama Configuration (Local)
+LLM_PROVIDER=ollama
+LLM_MODEL=llama3.1:8b
+EMBEDDING_MODEL=nomic-embed-text
+LLM_API_BASE_URL=http://localhost:11434/v1
+
+# Gemini Configuration
+LLM_PROVIDER=gemini
+LLM_MODEL=gemini-1.5-flash
+EMBEDDING_MODEL=models/embedding-001
+GEMINI_API_KEY=your-gemini-key
+```
+
+### Configuration Utilities
+
+```bash
+# Test your configuration
+python test_configuration.py
+
+# Switch models easily
+python switch_models.py switch ollama --llm-model llama3.1:8b
+
+# Get model recommendations
+python switch_models.py recommendations
+```
+
+### API Configuration Endpoints
+
+```bash
+# Check configuration status
+curl http://localhost:8000/config
+
+# Validate configuration
+curl http://localhost:8000/config/validate
+
+# Get model recommendations
+curl http://localhost:8000/config/models
 ```
 
 ## Architecture

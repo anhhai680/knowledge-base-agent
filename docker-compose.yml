@@ -4,15 +4,44 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - APP_ENV=production
-      - CHROMA_HOST=chroma
-      - CHROMA_PORT=8000
+      - APP_ENV=${APP_ENV}  # Application environment (development, production, etc.)
+      - OLLAMA_BASE_URL=${LLM_API_BASE_URL}  # Ollama API base URL
+      - CHROMA_HOST=${CHROMA_HOST}  # Chroma host
+      - CHROMA_PORT=${CHROMA_PORT}  # Chroma port
+      - LLM_PROVIDER=${LLM_PROVIDER}  # LLM provider (ollama, openai, etc.)
+      - LLM_MODEL=${LLM_MODEL}  # LLM model name
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL}  # Embedding model name
+      - EMBEDDING_API_BASE_URL=${EMBEDDING_API_BASE_URL}  # Embedding API base URL
+      - OPENAI_API_KEY=${OPENAI_API_KEY}  # OpenAI API key
+      - GEMINI_API_KEY=${GEMINI_API_KEY}  # Gemini API key
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}  # Azure OpenAI API key
+      - GITHUB_TOKEN=${GITHUB_TOKEN}  # GitHub token for repository access
+      - GITHUB_REPOS=${GITHUB_REPOS}  # GitHub repositories to index
+      - GITHUB_BRANCH=${GITHUB_BRANCH}  # Branch to index from GitHub repositories
     env_file:
       - .env
     depends_on:
-      - chroma
+      ollama:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
     volumes:
       - ./logs:/app/logs
+    restart: unless-stopped
+  
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0  # Optional, if your Ollama instance requires authentication
+    volumes:
+      - ollama_data:/ollama/data
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
     restart: unless-stopped
 
   chroma:
@@ -24,6 +53,11 @@ services:
       - CHROMA_SERVER_HTTP_PORT=8000
     volumes:
       - chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
     restart: unless-stopped
 
   # Optional: Add a simple web UI for development
@@ -38,3 +72,4 @@ services:
 
 volumes:
   chroma_data:
+  ollama_data:

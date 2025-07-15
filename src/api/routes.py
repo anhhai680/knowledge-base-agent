@@ -9,8 +9,10 @@ from .models import (
     RepositoryInfo, HealthResponse
 )
 from ..config.settings import settings
+from ..config.model_config import ModelConfiguration
 from ..utils.logging import setup_logging, get_logger
 from ..llm.llm_factory import LLMFactory
+from ..llm.embedding_factory import EmbeddingFactory
 from ..vectorstores.chroma_store import ChromaStore
 from ..loaders.github_loader import GitHubLoader
 from ..processors.text_processor import TextProcessor
@@ -50,33 +52,30 @@ async def startup_event():
     logger.info("Starting Knowledge Base Agent API...")
     
     try:
-        # Initialize vector store
+        # Initialize vector store with configured embedding model
+        embedding_provider = EmbeddingFactory._detect_provider_from_model(settings.embedding_model)
+        if embedding_provider == "auto":
+            embedding_provider = None  # Will use auto-detection
+        
         vector_store = ChromaStore(
             collection_name=settings.chroma_collection_name,
             host=settings.chroma_host,
-            port=settings.chroma_port
+            port=settings.chroma_port,
+            embedding_function=EmbeddingFactory.create_embedding(
+                provider=embedding_provider, 
+                model=settings.embedding_model
+            )
         )
         
-        # Initialize LLM
-        llm_config = {
-            "openai_api_key": settings.openai_api_key,
-            "gemini_api_key": settings.gemini_api_key,
-            "temperature": settings.temperature,
-            "max_tokens": settings.max_tokens
-        }
-        
-        provider = LLMFactory.get_available_provider(llm_config)
-        if not provider:
-            raise ValueError("No LLM provider available. Please configure API keys.")
-        
-        llm = LLMFactory.create_llm(provider, llm_config)
-        logger.info(f"Using LLM provider: {provider}")
+        # Initialize LLM with configured provider and model
+        llm = LLMFactory.create_llm()
+        logger.info(f"Using LLM provider: {settings.llm_provider} with model: {settings.llm_model}")
         
         # Initialize RAG agent
         rag_agent = RAGAgent(llm, vector_store)
         
         # Initialize other components
-        github_loader = GitHubLoader(settings.github_token)
+        github_loader = GitHubLoader(settings.github_token or "")
         text_processor = TextProcessor(
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap
@@ -121,7 +120,7 @@ async def index_repositories(request: IndexRequest, background_tasks: Background
         background_tasks.add_task(
             index_repositories_task, 
             request.repository_urls, 
-            request.branch,
+            request.branch or "main",
             task_id
         )
         
@@ -139,7 +138,14 @@ async def index_repositories(request: IndexRequest, background_tasks: Background
 
 async def index_repositories_task(repository_urls: List[str], branch: str, task_id: str):
     """Background task for indexing repositories"""
+    global github_loader, text_processor, rag_agent, indexed_repositories
+    
     logger.info(f"Starting indexing task {task_id} for {len(repository_urls)} repositories")
+    
+    # Check if components are initialized
+    if not github_loader or not text_processor or not rag_agent:
+        logger.error("Components not initialized for indexing task")
+        return
     
     total_documents = 0
     
@@ -243,3 +249,41 @@ async def root():
         "status": "running",
         "docs": "/docs"
     }
+
+@app.get("/config")
+async def get_configuration():
+    """Get current configuration status"""
+    try:
+        config_summary = ModelConfiguration.get_configuration_summary()
+        return config_summary
+    except Exception as e:
+        logger.error(f"Failed to get configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get configuration: {str(e)}")
+
+@app.get("/config/models")
+async def get_model_recommendations():
+    """Get model recommendations for different providers"""
+    try:
+        return {
+            "llm_models": ModelConfiguration.get_llm_recommendations(),
+            "embedding_models": ModelConfiguration.get_model_recommendations()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get model recommendations: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get model recommendations: {str(e)}")
+
+@app.get("/config/validate")
+async def validate_configuration():
+    """Validate current configuration"""
+    try:
+        llm_config = ModelConfiguration.validate_llm_config()
+        embedding_config = ModelConfiguration.validate_embedding_config()
+        
+        return {
+            "llm_validation": llm_config,
+            "embedding_validation": embedding_config,
+            "overall_valid": llm_config["is_valid"] and embedding_config["is_valid"]
+        }
+    except Exception as e:
+        logger.error(f"Failed to validate configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to validate configuration: {str(e)}")

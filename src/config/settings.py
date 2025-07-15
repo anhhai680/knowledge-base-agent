@@ -3,7 +3,16 @@ from typing import List, Optional
 import os
 
 class Settings(BaseSettings):
-    # LLM Settings
+    # LLM Configuration
+    llm_provider: str = "openai"  # Options: openai, gemini, azure_openai, ollama
+    llm_model: str = "gpt-3.5-turbo"  # Model name for the chosen provider
+    llm_api_base_url: Optional[str] = None  # Base URL for LLM API (useful for ollama)
+    
+    # Embedding Configuration
+    embedding_model: str = "text-embedding-ada-002"  # Embedding model name
+    embedding_api_base_url: Optional[str] = None  # Base URL for embedding API
+    
+    # API Keys
     openai_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
     azure_openai_api_key: Optional[str] = None
