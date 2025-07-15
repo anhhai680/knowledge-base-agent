@@ -193,7 +193,7 @@ def wait_for_services():
                 response = requests.get(chroma_url, timeout=2)
                 if response.status_code != 200:
                     services_ready = False
-            except:
+            except requests.exceptions.RequestException:
                 services_ready = False
             
             # Check Ollama if needed
