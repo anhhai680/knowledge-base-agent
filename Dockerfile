@@ -30,18 +30,27 @@ RUN chmod +x /app/entrypoint.sh
 RUN mkdir -p ./chroma_db
 
 # Set default environment variables
-ENV APP_ENV=production
+ENV APP_ENV=development
+ENV LLM_PROVIDER=ollama
+ENV LLM_MODEL=llama3.1:8b
+ENV LLM_API_BASE_URL=http://ollama:11434/v1
+ENV EMBEDDING_MODEL=nomic-embed-text
+ENV EMBEDDING_API_BASE_URL=http://ollama:11434/v1/embeddings
 ENV LOG_LEVEL=INFO
 ENV API_HOST=0.0.0.0
 ENV API_PORT=8000
-ENV CHROMA_HOST=localhost
+ENV CHROMA_HOST=chroma
 ENV CHROMA_PORT=8000
+ENV CHUNK_SIZE=1000
+ENV CHUNK_OVERLAP=200
+ENV MAX_TOKENS=4000
+ENV TEMPERATURE=0.7
 
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+# Health check with more lenient timing
+HEALTHCHECK --interval=60s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application with verification
