@@ -33,9 +33,9 @@ RUN mkdir -p ./chroma_db
 ENV APP_ENV=production
 ENV LLM_PROVIDER=ollama
 ENV LLM_MODEL=llama3.2:3b
-ENV LLM_API_BASE_URL=http://ollama:11434
+ENV LLM_API_BASE_URL=http://ollama:11434/v1
 ENV EMBEDDING_MODEL=nomic-embed-text
-ENV EMBEDDING_API_BASE_URL=http://ollama:11434
+ENV EMBEDDING_API_BASE_URL=http://ollama:11434/v1/embeddings
 ENV LOG_LEVEL=INFO
 ENV API_HOST=0.0.0.0
 ENV API_PORT=8000

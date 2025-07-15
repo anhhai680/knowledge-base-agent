@@ -1,225 +1,258 @@
 #!/usr/bin/env python3
 """
-Model switching utility for Knowledge Base Agent
+Model switching utility with automatic migration support
 """
 
 import sys
-import os
 import argparse
 from pathlib import Path
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
 
+from typing import Dict, Any
+from src.config.settings import settings
 from src.config.model_config import ModelConfiguration
+from src.llm.embedding_factory import EmbeddingFactory
+from src.vectorstores.chroma_store import ChromaStore
+from src.utils.model_migration import migration_manager
+from src.utils.logging import setup_logging, get_logger
 
-def update_env_file(env_file: str, updates: dict):
-    """Update environment file with new values"""
-    env_path = Path(env_file)
+# Setup logging
+setup_logging()
+logger = get_logger(__name__)
+
+def print_current_config():
+    """Print current configuration"""
+    print("\n🔧 Current Configuration:")
+    print(f"   LLM Provider: {settings.llm_provider}")
+    print(f"   LLM Model: {settings.llm_model}")
+    print(f"   Embedding Model: {settings.embedding_model}")
     
-    if not env_path.exists():
-        print(f"Environment file {env_file} does not exist!")
-        return False
+    # Get configuration summary
+    config_summary = ModelConfiguration.get_configuration_summary()
+    print(f"   Overall Status: {config_summary['overall_status']}")
     
-    # Read existing content
-    with open(env_path, 'r') as f:
-        lines = f.readlines()
+    if config_summary['embedding']['dimension']:
+        print(f"   Embedding Dimension: {config_summary['embedding']['dimension']}")
+
+def validate_model_switch(new_embedding_model: str) -> Dict[str, Any]:
+    """Validate model switch before proceeding"""
+    print(f"\n🔍 Validating switch to {new_embedding_model}...")
     
-    # Update lines
-    updated_lines = []
-    updated_keys = set()
+    validation_result = migration_manager.validate_model_switch(new_embedding_model)
     
-    for line in lines:
-        if '=' in line and not line.strip().startswith('#'):
-            key = line.split('=')[0].strip()
-            if key in updates:
-                updated_lines.append(f"{key}={updates[key]}\n")
-                updated_keys.add(key)
-            else:
-                updated_lines.append(line)
+    print(f"   Current Model: {validation_result['current_model']}")
+    print(f"   New Model: {validation_result['new_model']}")
+    print(f"   Migration Needed: {validation_result['migration_needed']}")
+    print(f"   Is Safe: {validation_result['is_safe']}")
+    
+    if validation_result['warnings']:
+        print("\n   ⚠️  Warnings:")
+        for warning in validation_result['warnings']:
+            print(f"      - {warning}")
+    
+    if validation_result['recommendations']:
+        print("\n   💡 Recommendations:")
+        for rec in validation_result['recommendations']:
+            print(f"      - {rec}")
+    
+    return validation_result
+
+def switch_embedding_model(new_model: str, force: bool = False) -> bool:
+    """Switch to a new embedding model with automatic migration"""
+    try:
+        # Validate the switch
+        validation_result = validate_model_switch(new_model)
+        
+        if not validation_result['is_safe'] and not force:
+            print("\n❌ Model switch validation failed. Use --force to proceed anyway.")
+            return False
+        
+        if not validation_result['migration_needed']:
+            print(f"\n✅ Model switch to {new_model} is compatible. No migration needed.")
+            settings.embedding_model = new_model
+            return True
+        
+        # Initialize vector store
+        print(f"\n🔄 Initializing vector store for migration...")
+        vector_store = ChromaStore(
+            collection_name=settings.chroma_collection_name,
+            host=settings.chroma_host,
+            port=settings.chroma_port
+        )
+        
+        # Get collection info before migration
+        collection_info = vector_store.get_collection_info()
+        doc_count = collection_info.get("count", 0)
+        
+        print(f"   Current collection has {doc_count} documents")
+        
+        # Confirm migration if there are documents
+        if doc_count > 0 and not force:
+            response = input(f"\n   This will recreate the collection and migrate {doc_count} documents. Continue? (y/N): ")
+            if response.lower() != 'y':
+                print("Migration cancelled.")
+                return False
+        
+        # Perform migration
+        print(f"\n🚀 Starting migration to {new_model}...")
+        migration_result = migration_manager.migrate_vector_store(
+            vector_store=vector_store,
+            new_embedding_model=new_model,
+            backup_data=True
+        )
+        
+        # Display migration results
+        print(f"\n📊 Migration Results:")
+        print(f"   Status: {migration_result['status']}")
+        print(f"   Documents Migrated: {migration_result.get('documents_migrated', 0)}")
+        
+        if migration_result.get('duration_seconds'):
+            print(f"   Duration: {migration_result['duration_seconds']:.2f} seconds")
+        
+        if migration_result.get('errors'):
+            print(f"   Errors: {len(migration_result['errors'])}")
+            for error in migration_result['errors']:
+                print(f"      - {error}")
+        
+        if migration_result['status'] in ['completed', 'completed_with_warnings']:
+            print(f"\n✅ Successfully switched to {new_model}")
+            return True
         else:
-            updated_lines.append(line)
-    
-    # Add any new keys that weren't in the file
-    for key, value in updates.items():
-        if key not in updated_keys:
-            updated_lines.append(f"{key}={value}\n")
-    
-    # Write updated content
-    with open(env_path, 'w') as f:
-        f.writelines(updated_lines)
-    
-    print(f"Updated {env_file} with new configuration")
-    return True
-
-def switch_to_openai(args):
-    """Switch to OpenAI configuration"""
-    updates = {
-        'LLM_PROVIDER': 'openai',
-        'LLM_MODEL': args.llm_model or 'gpt-4o-mini',
-        'EMBEDDING_MODEL': args.embedding_model or 'text-embedding-3-small'
-    }
-    
-    if args.llm_api_key:
-        updates['OPENAI_API_KEY'] = args.llm_api_key
-    
-    # Remove base URLs for OpenAI
-    if 'LLM_API_BASE_URL' in updates:
-        del updates['LLM_API_BASE_URL']
-    if 'EMBEDDING_API_BASE_URL' in updates:
-        del updates['EMBEDDING_API_BASE_URL']
-    
-    return updates
-
-def switch_to_gemini(args):
-    """Switch to Gemini configuration"""
-    updates = {
-        'LLM_PROVIDER': 'gemini',
-        'LLM_MODEL': args.llm_model or 'gemini-1.5-flash',
-        'EMBEDDING_MODEL': args.embedding_model or 'models/embedding-001'
-    }
-    
-    if args.llm_api_key:
-        updates['GEMINI_API_KEY'] = args.llm_api_key
-    
-    # Remove base URLs for Gemini
-    if 'LLM_API_BASE_URL' in updates:
-        del updates['LLM_API_BASE_URL']
-    if 'EMBEDDING_API_BASE_URL' in updates:
-        del updates['EMBEDDING_API_BASE_URL']
-    
-    return updates
-
-def switch_to_ollama(args):
-    """Switch to Ollama configuration"""
-    updates = {
-        'LLM_PROVIDER': 'ollama',
-        'LLM_MODEL': args.llm_model or 'llama3.1:8b',
-        'EMBEDDING_MODEL': args.embedding_model or 'nomic-embed-text',
-        'LLM_API_BASE_URL': args.llm_base_url or 'http://localhost:11434/v1',
-        'EMBEDDING_API_BASE_URL': args.embedding_base_url or 'http://localhost:11434/v1/embeddings'
-    }
-    
-    return updates
-
-def switch_to_azure_openai(args):
-    """Switch to Azure OpenAI configuration"""
-    updates = {
-        'LLM_PROVIDER': 'azure_openai',
-        'LLM_MODEL': args.llm_model or 'gpt-4o',
-        'EMBEDDING_MODEL': args.embedding_model or 'text-embedding-3-large'
-    }
-    
-    if args.llm_api_key:
-        updates['AZURE_OPENAI_API_KEY'] = args.llm_api_key
-    
-    if args.azure_endpoint:
-        updates['AZURE_OPENAI_ENDPOINT'] = args.azure_endpoint
-    
-    return updates
-
-def show_current_config():
-    """Show current configuration"""
-    print("Current Configuration:")
-    print("=" * 50)
-    
-    try:
-        config = ModelConfiguration.get_configuration_summary()
-        
-        print(f"Environment: {config['environment']}")
-        print(f"Overall Status: {config['overall_status']}")
-        
-        # LLM Config
-        llm_config = config['llm']
-        print(f"\nLLM Configuration:")
-        print(f"  Provider: {llm_config['provider']}")
-        print(f"  Model: {llm_config['model']}")
-        print(f"  Valid: {llm_config['is_valid']}")
-        if llm_config['error_message']:
-            print(f"  Error: {llm_config['error_message']}")
-        
-        # Embedding Config
-        embedding_config = config['embedding']
-        print(f"\nEmbedding Configuration:")
-        print(f"  Model: {embedding_config['model']}")
-        print(f"  Detected Provider: {embedding_config['detected_provider']}")
-        print(f"  Valid: {embedding_config['is_valid']}")
-        if embedding_config['error_message']:
-            print(f"  Error: {embedding_config['error_message']}")
-        
-    except Exception as e:
-        print(f"Error reading configuration: {e}")
-
-def show_recommendations():
-    """Show model recommendations"""
-    print("Model Recommendations:")
-    print("=" * 50)
-    
-    try:
-        llm_recs = ModelConfiguration.get_llm_recommendations()
-        embedding_recs = ModelConfiguration.get_model_recommendations()
-        
-        print("LLM Models:")
-        for provider, models in llm_recs.items():
-            print(f"  {provider}: {', '.join(models)}")
-        
-        print("\nEmbedding Models:")
-        for provider, models in embedding_recs.items():
-            print(f"  {provider}: {', '.join(models)}")
+            print(f"\n❌ Migration failed")
+            return False
             
     except Exception as e:
-        print(f"Error getting recommendations: {e}")
+        logger.error(f"Failed to switch embedding model: {str(e)}")
+        print(f"\n❌ Failed to switch embedding model: {str(e)}")
+        return False
+
+def switch_llm_model(new_provider: str, new_model: str) -> bool:
+    """Switch LLM provider and model"""
+    try:
+        print(f"\n🔄 Switching LLM to {new_provider}:{new_model}...")
+        
+        # Update settings
+        settings.llm_provider = new_provider
+        settings.llm_model = new_model
+        
+        # Validate new configuration
+        llm_config = ModelConfiguration.validate_llm_config()
+        
+        if llm_config['is_valid']:
+            print(f"✅ Successfully switched to {new_provider}:{new_model}")
+            return True
+        else:
+            print(f"❌ LLM configuration validation failed: {llm_config['error_message']}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to switch LLM model: {str(e)}")
+        print(f"❌ Failed to switch LLM model: {str(e)}")
+        return False
+
+def show_available_models():
+    """Show available models for different providers"""
+    print("\n📚 Available Models:")
+    
+    # Show embedding models
+    embedding_recs = ModelConfiguration.get_model_recommendations()
+    print("\n   🔤 Embedding Models:")
+    for provider, models in embedding_recs.items():
+        print(f"      {provider.upper()}:")
+        for model in models:
+            dimension = ModelConfiguration.get_embedding_dimension(model)
+            dim_str = f" ({dimension}D)" if dimension else ""
+            print(f"         - {model}{dim_str}")
+    
+    # Show LLM models
+    llm_recs = ModelConfiguration.get_llm_recommendations()
+    print("\n   🤖 LLM Models:")
+    for provider, models in llm_recs.items():
+        print(f"      {provider.upper()}:")
+        for model in models:
+            print(f"         - {model}")
+
+def show_migration_history():
+    """Show migration history"""
+    print("\n📜 Migration History:")
+    
+    history = migration_manager.get_migration_history()
+    if not history:
+        print("   No migrations found.")
+        return
+    
+    for i, migration in enumerate(history, 1):
+        print(f"\n   {i}. {migration.get('start_time', 'Unknown time')}")
+        print(f"      {migration.get('old_model', 'Unknown')} -> {migration.get('new_model', 'Unknown')}")
+        print(f"      Status: {migration.get('status', 'Unknown')}")
+        if migration.get('documents_migrated'):
+            print(f"      Documents: {migration['documents_migrated']}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Switch between LLM and embedding models')
-    parser.add_argument('--env-file', default='.env', help='Path to environment file')
+    """Main function"""
+    parser = argparse.ArgumentParser(
+        description="Switch between different LLM and embedding models",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+    python switch_models.py --show-config
+    python switch_models.py --embedding-model text-embedding-3-small
+    python switch_models.py --llm-provider openai --llm-model gpt-4o
+    python switch_models.py --embedding-model nomic-embed-text --force
+    python switch_models.py --show-models
+    python switch_models.py --show-history
+        """
+    )
     
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
-    
-    # Switch command
-    switch_parser = subparsers.add_parser('switch', help='Switch to a different provider')
-    switch_parser.add_argument('provider', choices=['openai', 'gemini', 'ollama', 'azure_openai'],
-                              help='Provider to switch to')
-    switch_parser.add_argument('--llm-model', help='LLM model to use')
-    switch_parser.add_argument('--embedding-model', help='Embedding model to use')
-    switch_parser.add_argument('--llm-api-key', help='API key for LLM provider')
-    switch_parser.add_argument('--llm-base-url', help='Base URL for LLM API (ollama only)')
-    switch_parser.add_argument('--embedding-base-url', help='Base URL for embedding API (ollama only)')
-    switch_parser.add_argument('--azure-endpoint', help='Azure OpenAI endpoint')
-    
-    # Show command
-    subparsers.add_parser('show', help='Show current configuration')
-    
-    # Recommendations command
-    subparsers.add_parser('recommendations', help='Show model recommendations')
+    parser.add_argument('--show-config', action='store_true',
+                      help='Show current configuration')
+    parser.add_argument('--embedding-model', type=str,
+                      help='Switch to a new embedding model')
+    parser.add_argument('--llm-provider', type=str,
+                      help='Switch to a new LLM provider')
+    parser.add_argument('--llm-model', type=str,
+                      help='Switch to a new LLM model')
+    parser.add_argument('--force', action='store_true',
+                      help='Force the switch even if validation fails')
+    parser.add_argument('--show-models', action='store_true',
+                      help='Show available models')
+    parser.add_argument('--show-history', action='store_true',
+                      help='Show migration history')
     
     args = parser.parse_args()
     
-    if args.command == 'switch':
-        # Get updates based on provider
-        updates = {}
-        if args.provider == 'openai':
-            updates = switch_to_openai(args)
-        elif args.provider == 'gemini':
-            updates = switch_to_gemini(args)
-        elif args.provider == 'ollama':
-            updates = switch_to_ollama(args)
-        elif args.provider == 'azure_openai':
-            updates = switch_to_azure_openai(args)
-        
-        # Update environment file
-        if updates and update_env_file(args.env_file, updates):
-            print(f"Successfully switched to {args.provider}")
-            print("Please restart the application for changes to take effect.")
-        
-    elif args.command == 'show':
-        show_current_config()
+    print("🔄 Model Switching Utility")
+    print("=" * 50)
     
-    elif args.command == 'recommendations':
-        show_recommendations()
+    # Always show current config first
+    print_current_config()
     
+    # Handle different commands
+    if args.show_models:
+        show_available_models()
+    elif args.show_history:
+        show_migration_history()
+    elif args.show_config:
+        # Already shown above
+        pass
+    elif args.embedding_model:
+        success = switch_embedding_model(args.embedding_model, args.force)
+        if success:
+            print_current_config()
+        sys.exit(0 if success else 1)
+    elif args.llm_provider or args.llm_model:
+        if args.llm_provider and args.llm_model:
+            success = switch_llm_model(args.llm_provider, args.llm_model)
+            if success:
+                print_current_config()
+            sys.exit(0 if success else 1)
+        else:
+            print("❌ Both --llm-provider and --llm-model must be specified together")
+            sys.exit(1)
     else:
         parser.print_help()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

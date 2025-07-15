@@ -13,6 +13,109 @@ logger = get_logger(__name__)
 class ModelConfiguration:
     """Utility class for managing model configurations"""
     
+    # Known embedding dimensions for different models
+    EMBEDDING_DIMENSIONS = {
+        # OpenAI
+        "text-embedding-ada-002": 1536,
+        "text-embedding-3-small": 1536,
+        "text-embedding-3-large": 3072,
+        
+        # Gemini
+        "models/embedding-001": 768,
+        
+        # Ollama common models
+        "nomic-embed-text": 768,
+        "all-minilm": 384,
+        "mxbai-embed-large": 1024,
+        
+        # HuggingFace
+        "sentence-transformers/all-MiniLM-L6-v2": 384,
+        "sentence-transformers/all-mpnet-base-v2": 768,
+        "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 384,
+    }
+    
+    @staticmethod
+    def get_embedding_dimension(model_name: str) -> Optional[int]:
+        """
+        Get the embedding dimension for a model
+        
+        Args:
+            model_name: Name of the embedding model
+            
+        Returns:
+            Integer dimension or None if unknown
+        """
+        return ModelConfiguration.EMBEDDING_DIMENSIONS.get(model_name)
+    
+    @staticmethod
+    def detect_embedding_dimension(embedding_function=None) -> Optional[int]:
+        """
+        Detect embedding dimension by running a test embedding
+        
+        Args:
+            embedding_function: Optional embedding function to test
+            
+        Returns:
+            Integer dimension or None if detection fails
+        """
+        try:
+            if embedding_function is None:
+                embedding_function = EmbeddingFactory.create_embedding()
+            
+            # Test with a simple text
+            test_embedding = embedding_function.embed_query("test")
+            dimension = len(test_embedding)
+            logger.info(f"Detected embedding dimension: {dimension}")
+            return dimension
+            
+        except Exception as e:
+            logger.error(f"Failed to detect embedding dimension: {e}")
+            return None
+    
+    @staticmethod
+    def check_dimension_compatibility(current_model: str, new_model: str) -> bool:
+        """
+        Check if two models have compatible embedding dimensions
+        
+        Args:
+            current_model: Current embedding model
+            new_model: New embedding model to switch to
+            
+        Returns:
+            True if compatible, False otherwise
+        """
+        current_dim = ModelConfiguration.get_embedding_dimension(current_model)
+        new_dim = ModelConfiguration.get_embedding_dimension(new_model)
+        
+        if current_dim is None or new_dim is None:
+            # If we can't determine dimensions, assume incompatible for safety
+            logger.warning(f"Cannot determine dimensions for {current_model} and/or {new_model}")
+            return False
+            
+        return current_dim == new_dim
+    
+    @staticmethod
+    def get_collection_metadata(embedding_model: str) -> Dict[str, Any]:
+        """
+        Get metadata for a collection based on embedding model
+        
+        Args:
+            embedding_model: Name of the embedding model
+            
+        Returns:
+            Dictionary with collection metadata
+        """
+        provider = EmbeddingFactory._detect_provider_from_model(embedding_model)
+        dimension = ModelConfiguration.get_embedding_dimension(embedding_model)
+        
+        return {
+            "embedding_model": embedding_model,
+            "embedding_provider": provider,
+            "embedding_dimension": dimension,
+            "created_at": str(settings.app_env),
+            "version": "1.0"
+        }
+    
     @staticmethod
     def validate_llm_config() -> Dict[str, Any]:
         """
@@ -77,7 +180,8 @@ class ModelConfiguration:
             "api_base_url": settings.embedding_api_base_url,
             "detected_provider": None,
             "is_valid": False,
-            "error_message": None
+            "error_message": None,
+            "dimension": ModelConfiguration.get_embedding_dimension(settings.embedding_model)
         }
         
         try:
