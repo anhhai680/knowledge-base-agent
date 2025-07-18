@@ -34,6 +34,13 @@ class ChromaStore(BaseVectorStore):
     def _initialize_chroma_with_compatibility_check(self):
         """Initialize Chroma with dimension compatibility checking"""
         try:
+            # For Docker environment, always use persistent client to ensure data persistence
+            # The HTTP client creates separate in-memory collections that don't persist
+            if os.getenv("DOCKER_CONTAINER"):
+                logger.info("Docker environment detected, using persistent client for data consistency")
+                self._initialize_persistent_client()
+                return
+            
             # First, try to connect to existing collection
             self.client = chromadb.HttpClient(host=self.host, port=self.port)
             

@@ -83,15 +83,23 @@ An AI-powered knowledge base agent that can index GitHub repositories and answer
 ### Running with Docker Compose (Recommended)
 
 ```bash
+# Set up proper data persistence (run once)
+./setup_chroma_persistence.sh
+
 # Start all services
 docker-compose up -d
 
 # Check logs
 docker-compose logs -f
 
-# Stop services
+# Validate data persistence
+./validate_chroma_persistence.sh
+
+# Stop services (data will persist)
 docker-compose down
 ```
+
+**Note**: The Chroma data persistence fix ensures that your knowledge base data survives container restarts and rebuilds.
 
 ### Running Locally
 
