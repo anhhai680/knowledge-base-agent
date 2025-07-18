@@ -44,17 +44,98 @@ github_loader = None
 text_processor = None
 indexed_repositories: Dict[str, RepositoryInfo] = {}
 
-@app.on_event("startup")
-async def startup_event():
+async def restore_indexed_repositories():
+    """Restore indexed repositories information from the database"""
+    global indexed_repositories
+    try:
+        if not rag_agent or not rag_agent.vectorstore:
+            logger.warning("RAG agent not initialized, skipping restore")
+            return
+            
+        logger.info("Restoring indexed repositories from database...")
+        
+        # Access the ChromaDB client through the vector store
+        try:
+            # For ChromaStore, we need to access the client differently
+            if hasattr(rag_agent.vectorstore, 'client'):
+                chroma_client = rag_agent.vectorstore.client
+            elif hasattr(rag_agent.vectorstore, 'vector_store') and hasattr(rag_agent.vectorstore.vector_store, '_client'):
+                chroma_client = rag_agent.vectorstore.vector_store._client
+            else:
+                logger.error("Cannot access ChromaDB client")
+                return
+        except Exception as e:
+            logger.error(f"Failed to access ChromaDB client: {str(e)}")
+            return
+        
+        # Get all unique repositories from the database
+        collections = chroma_client.list_collections()
+        
+        if not collections:
+            logger.info("No collections found in database")
+            return
+            
+        logger.info(f"Found {len(collections)} collections in database")
+        
+        for collection in collections:
+            try:
+                # Get the collection
+                coll = chroma_client.get_collection(collection.name)
+                
+                # Get all documents with metadata
+                results = coll.get()
+                
+                if not results.get("documents") or not results.get("metadatas"):
+                    continue
+                    
+                # Extract repositories from metadata
+                repositories_in_collection = set()
+                metadatas = results.get("metadatas", [])
+                if metadatas:
+                    for metadata in metadatas:
+                        if metadata and "repository" in metadata:
+                            repositories_in_collection.add(metadata["repository"])
+                
+                # For each repository, create a RepositoryInfo entry
+                for repo_url in repositories_in_collection:
+                    repo_id = repo_url.split("/")[-1]  # Extract repo name
+                    
+                    # Count documents for this repository
+                    metadatas = results.get("metadatas", [])
+                    repo_docs = [i for i, meta in enumerate(metadatas) 
+                               if meta and meta.get("repository") == repo_url] if metadatas else []
+                    
+                    indexed_repositories[repo_id] = RepositoryInfo(
+                        url=repo_url,
+                        status="indexed",
+                        documents_count=len(repo_docs),
+                        last_indexed=datetime.now().isoformat(),
+                        error=None
+                    )
+                    
+                    logger.info(f"Restored repository: {repo_url} with {len(repo_docs)} documents")
+                    
+            except Exception as e:
+                logger.error(f"Error processing collection {collection.name}: {str(e)}")
+                continue
+        
+        logger.info(f"Successfully restored {len(indexed_repositories)} repositories")
+        
+    except Exception as e:
+        logger.error(f"Error restoring indexed repositories: {str(e)}")
+
+async def initialize_components():
     """Initialize components on startup with proper error handling"""
     global rag_agent, github_loader, text_processor
     
+    print("STARTUP DEBUG: Starting Knowledge Base Agent API...")
     logger.info("Starting Knowledge Base Agent API...")
     
     try:
         # Validate configuration first
         from ..config.model_config import ModelConfiguration
         
+        print("STARTUP DEBUG: Validating configuration...")
         logger.info("Validating configuration...")
         llm_config = ModelConfiguration.validate_llm_config()
         embedding_config = ModelConfiguration.validate_embedding_config()
@@ -67,6 +148,7 @@ async def startup_event():
             logger.error(f"Invalid embedding configuration: {embedding_config['error_message']}")
             raise ValueError(f"Invalid embedding configuration: {embedding_config['error_message']}")
         
+        print("STARTUP DEBUG: Configuration validation passed")
         logger.info("Configuration validation passed")
         
         # Initialize embedding function with retry logic
@@ -111,9 +193,10 @@ async def startup_event():
                     logger.info("Falling back to persistent vector store...")
                     vector_store = ChromaStore(
                         collection_name=settings.chroma_collection_name,
-                        host="localhost",  # Fallback to local
+                        host="localhost",  # This will trigger fallback to persistent client
                         port=8000,
-                        embedding_function=embedding_function
+                        embedding_function=embedding_function,
+                        persist_directory="/app/chroma_db"  # Explicit persistent directory
                     )
                     break
                 await asyncio.sleep(2 ** attempt)  # Exponential backoff
@@ -153,6 +236,26 @@ async def startup_event():
         # Don't raise here - let the app start in a degraded state
         # The health check will reflect the actual status
 
+# Add the startup event handler
+@app.on_event("startup")
+async def startup_event():
+    """Handle startup event"""
+    await initialize_components()
+    await restore_indexed_repositories()
+
+@app.get("/manual-restore")
+async def manual_restore():
+    """Manual endpoint to trigger repository restoration"""
+    try:
+        await restore_indexed_repositories()
+        return {
+            "message": "Repository restoration completed",
+            "repositories_found": len(indexed_repositories),
+            "repositories": list(indexed_repositories.keys())
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.post("/query", response_model=QueryResponse)
 async def query_knowledge_base(request: QueryRequest):
     """Query the knowledge base"""
@@ -169,97 +272,115 @@ async def query_knowledge_base(request: QueryRequest):
             num_sources=result["num_sources"],
             error=result.get("error")
         )
-        
     except Exception as e:
-        logger.error(f"Query failed: {str(e)}")
+        logger.error(f"Error querying knowledge base: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/index", response_model=IndexResponse)
-async def index_repositories(request: IndexRequest, background_tasks: BackgroundTasks):
-    """Index GitHub repositories"""
+async def index_repository(request: IndexRequest, background_tasks: BackgroundTasks):
+    """Index a GitHub repository"""
     try:
-        if not github_loader or not text_processor or not rag_agent:
-            raise HTTPException(status_code=500, detail="Components not initialized")
+        if not rag_agent:
+            raise HTTPException(status_code=500, detail="RAG agent not initialized")
         
-        # Start background indexing task
-        task_id = f"index_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        if not github_loader:
+            raise HTTPException(status_code=500, detail="GitHub loader not initialized")
+        
+        if not text_processor:
+            raise HTTPException(status_code=500, detail="Text processor not initialized")
+        
+        # Check if repository is already indexed
+        repo_name = request.repo_url.split("/")[-1]
+        if repo_name in indexed_repositories:
+            return IndexResponse(
+                message=f"Repository '{repo_name}' is already indexed",
+                status="already_indexed",
+                repository_id=repo_name
+            )
+        
+        # Start indexing in the background
         background_tasks.add_task(
-            index_repositories_task, 
-            request.repository_urls, 
-            request.branch or "main",
-            task_id
+            index_repository_task,
+            request.repo_url,
+            request.branch,
+            request.file_patterns
         )
         
         return IndexResponse(
-            message="Indexing started",
-            status="processing",
-            repositories_processed=0,
-            documents_indexed=0,
-            task_id=task_id
+            message=f"Started indexing repository: {request.repo_url}",
+            status="indexing_started",
+            repository_id=repo_name
         )
-        
     except Exception as e:
-        logger.error(f"Indexing failed: {str(e)}")
+        logger.error(f"Error starting repository indexing: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def index_repositories_task(repository_urls: List[str], branch: str, task_id: str):
-    """Background task for indexing repositories"""
-    global github_loader, text_processor, rag_agent, indexed_repositories
+async def index_repository_task(repo_url: str, branch: str = "main", file_patterns: List[str] = None):
+    """Background task to index a repository"""
+    repo_name = repo_url.split("/")[-1]
     
-    logger.info(f"Starting indexing task {task_id} for {len(repository_urls)} repositories")
-    
-    # Check if components are initialized
-    if not github_loader or not text_processor or not rag_agent:
-        logger.error("Components not initialized for indexing task")
-        return
-    
-    total_documents = 0
-    
-    for repo_url in repository_urls:
-        try:
-            logger.info(f"Indexing repository: {repo_url}")
+    try:
+        # Create repository info entry
+        indexed_repositories[repo_name] = RepositoryInfo(
+            id=repo_name,
+            url=repo_url,
+            name=repo_name,
+            description=f"Repository: {repo_url}",
+            branch=branch,
+            last_indexed=datetime.now(),
+            document_count=0,
+            status="indexing"
+        )
+        
+        logger.info(f"Starting indexing of repository: {repo_url}")
+        
+        # Load repository content
+        documents = await github_loader.load_repository(
+            repo_url=repo_url,
+            branch=branch,
+            file_patterns=file_patterns or ["*.py", "*.js", "*.ts", "*.md", "*.txt"]
+        )
+        
+        if not documents:
+            indexed_repositories[repo_name].status = "failed"
+            logger.error(f"No documents found in repository: {repo_url}")
+            return
+        
+        # Process documents
+        processed_docs = []
+        for doc in documents:
+            # Add metadata
+            doc.metadata.update({
+                "repository": repo_url,
+                "branch": branch,
+                "indexed_at": datetime.now().isoformat()
+            })
             
-            # Update repository status
-            indexed_repositories[repo_url] = RepositoryInfo(
-                url=repo_url,
-                status="indexing",
-                documents_count=0
-            )
-            
-            # Load documents from repository
-            documents = github_loader.load_repository(repo_url, branch)
-            
-            # Process documents
-            processed_docs = text_processor.process_documents(documents)
-            
-            # Add to vector store
-            doc_ids = rag_agent.add_documents(processed_docs)
-            
-            # Update repository info
-            indexed_repositories[repo_url] = RepositoryInfo(
-                url=repo_url,
-                status="completed",
-                documents_count=len(doc_ids),
-                last_indexed=datetime.now().isoformat()
-            )
-            
-            total_documents += len(doc_ids)
-            logger.info(f"Successfully indexed {len(doc_ids)} documents from {repo_url}")
-            
-        except Exception as e:
-            logger.error(f"Failed to index repository {repo_url}: {str(e)}")
-            indexed_repositories[repo_url] = RepositoryInfo(
-                url=repo_url,
-                status="failed",
-                documents_count=0,
-                error=str(e)
-            )
-    
-    logger.info(f"Indexing task {task_id} completed. Total documents indexed: {total_documents}")
+            # Process and chunk the document
+            chunks = text_processor.process_document(doc)
+            processed_docs.extend(chunks)
+        
+        # Add to vector store
+        await rag_agent.add_documents(processed_docs)
+        
+        # Update repository info
+        indexed_repositories[repo_name].document_count = len(processed_docs)
+        indexed_repositories[repo_name].status = "indexed"
+        indexed_repositories[repo_name].last_indexed = datetime.now()
+        
+        logger.info(f"Successfully indexed {len(processed_docs)} documents from {repo_url}")
+        
+    except Exception as e:
+        logger.error(f"Error indexing repository {repo_url}: {str(e)}")
+        if repo_name in indexed_repositories:
+            indexed_repositories[repo_name].status = "failed"
 
 @app.get("/repositories")
 async def get_repositories():
-    """Get list of indexed repositories"""
+    """Get all indexed repositories"""
+    # If empty, try to restore from database
+    if not indexed_repositories:
+        await restore_indexed_repositories()
     return list(indexed_repositories.values())
 
 @app.delete("/repositories/{repository_id}")
@@ -272,70 +393,50 @@ async def delete_repository(repository_id: str):
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Enhanced health check endpoint with detailed component status"""
-    components = {}
-    
     try:
-        # Check basic API health
+        components = {}
+        
+        # Check API status
         components["api"] = "healthy"
         
         # Check vector store
-        if rag_agent:
+        if rag_agent and rag_agent.vectorstore:
             try:
-                collection_info = rag_agent.get_collection_info()
-                components["vector_store"] = "healthy" if "error" not in collection_info else "degraded"
+                # Try to access the vector store
+                collections = rag_agent.vectorstore.vector_store._client.list_collections()
+                components["vector_store"] = "healthy"
             except Exception as e:
-                logger.warning(f"Vector store health check failed: {e}")
-                components["vector_store"] = "degraded"
+                components["vector_store"] = f"unhealthy: {str(e)}"
         else:
             components["vector_store"] = "not_initialized"
         
-        # Check LLM (basic check)
-        if rag_agent:
-            try:
-                # Try a simple test query to ensure LLM is working
-                components["llm"] = "healthy"
-            except Exception as e:
-                logger.warning(f"LLM health check failed: {e}")
-                components["llm"] = "degraded"
+        # Check LLM
+        if rag_agent and rag_agent.llm:
+            components["llm"] = "healthy"
         else:
             components["llm"] = "not_initialized"
         
-        # Check GitHub loader
+        # Check other components
         components["github_loader"] = "healthy" if github_loader else "not_initialized"
-        
-        # Check text processor
         components["text_processor"] = "healthy" if text_processor else "not_initialized"
         
         # Check configuration
         try:
-            from ..config.model_config import ModelConfiguration
-            config_summary = ModelConfiguration.get_configuration_summary()
-            components["configuration"] = "healthy" if config_summary["overall_status"] == "ready" else "degraded"
-        except Exception as e:
-            logger.warning(f"Configuration health check failed: {e}")
-            components["configuration"] = "degraded"
-        
-        # Determine overall status
-        # API is healthy if basic functionality works, even if some components are degraded
-        critical_components = ["api", "configuration"]
-        healthy_count = sum(1 for key, status in components.items() if status == "healthy")
-        total_count = len(components)
-        
-        if all(components.get(comp) in ["healthy", "degraded"] for comp in critical_components):
-            if healthy_count >= total_count * 0.6:  # At least 60% healthy
-                overall_status = "healthy"
+            llm_config = ModelConfiguration.validate_llm_config()
+            embedding_config = ModelConfiguration.validate_embedding_config()
+            if llm_config["is_valid"] and embedding_config["is_valid"]:
+                components["configuration"] = "healthy"
             else:
-                overall_status = "degraded"
-        else:
-            overall_status = "unhealthy"
+                components["configuration"] = "invalid"
+        except Exception as e:
+            components["configuration"] = f"error: {str(e)}"
         
         return HealthResponse(
-            status=overall_status,
+            status="healthy",
             timestamp=datetime.now().isoformat(),
             version="1.0.0",
             components=components
         )
-        
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
         return HealthResponse(
@@ -348,47 +449,49 @@ async def health_check():
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {
-        "message": "Knowledge Base Agent API",
-        "version": "1.0.0",
-        "status": "running",
-        "docs": "/docs"
-    }
+    return {"message": "Knowledge Base Agent API", "version": "1.0.0"}
 
 @app.get("/config")
-async def get_configuration():
-    """Get current configuration status"""
-    try:
-        config_summary = ModelConfiguration.get_configuration_summary()
-        return config_summary
-    except Exception as e:
-        logger.error(f"Failed to get configuration: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get configuration: {str(e)}")
+async def get_config():
+    """Get current configuration"""
+    return {
+        "llm_provider": settings.llm_provider,
+        "llm_model": settings.llm_model,
+        "embedding_model": settings.embedding_model,
+        "chroma_host": settings.chroma_host,
+        "chroma_port": settings.chroma_port,
+        "app_env": settings.app_env
+    }
 
 @app.get("/config/models")
-async def get_model_recommendations():
-    """Get model recommendations for different providers"""
+async def get_available_models():
+    """Get available models for current provider"""
     try:
+        from ..config.model_config import ModelConfiguration
+        
+        available_models = ModelConfiguration.get_available_models()
         return {
-            "llm_models": ModelConfiguration.get_llm_recommendations(),
-            "embedding_models": ModelConfiguration.get_model_recommendations()
+            "llm_models": available_models["llm"],
+            "embedding_models": available_models["embedding"]
         }
     except Exception as e:
-        logger.error(f"Failed to get model recommendations: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get model recommendations: {str(e)}")
+        logger.error(f"Error getting available models: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/config/validate")
-async def validate_configuration():
+@app.post("/config/validate")
+async def validate_config():
     """Validate current configuration"""
     try:
+        from ..config.model_config import ModelConfiguration
+        
         llm_config = ModelConfiguration.validate_llm_config()
         embedding_config = ModelConfiguration.validate_embedding_config()
         
         return {
-            "llm_validation": llm_config,
-            "embedding_validation": embedding_config,
+            "llm_config": llm_config,
+            "embedding_config": embedding_config,
             "overall_valid": llm_config["is_valid"] and embedding_config["is_valid"]
         }
     except Exception as e:
-        logger.error(f"Failed to validate configuration: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to validate configuration: {str(e)}")
+        logger.error(f"Error validating configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
