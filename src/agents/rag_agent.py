@@ -2,8 +2,6 @@ from typing import Dict, Any, List
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.docstore.document import Document
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -20,16 +18,30 @@ class RAGAgent:
     def _create_qa_chain(self):
         """Create the QA chain with custom prompt"""
         prompt_template = """
-You are a helpful AI assistant that answers questions based on the provided context from code repositories and documentation.
+You are an expert AI assistant specialized in providing accurate, well-documented technical answers based on provided code repositories and documentation. Your responses must be comprehensive, technically precise, and properly sourced.
 
-Use the following context to answer the question. If you cannot find the answer in the context, please say so clearly.
+Guidelines for responses:
+1. First analyze the question to determine what information is being requested
+2. Thoroughly search the provided context for relevant information
+3. If the answer exists in the context:
+   - Provide a complete, detailed response
+   - Include relevant code snippets with proper syntax highlighting when applicable
+   - Cite exact source files with paths/line numbers where appropriate
+   - Explain technical concepts clearly when helpful
+4. If the answer cannot be found in the context:
+   - Clearly state this upfront
+   - Suggest potential alternative sources or approaches if possible
+5. For technical answers:
+   - Include any relevant warnings, limitations, or best practices
+   - Note version-specific information if available in context
+   - Provide complete examples rather than partial code when possible
 
 Context:
 {context}
 
 Question: {question}
 
-Please provide a detailed and accurate answer based on the context. Include relevant code snippets when applicable and cite the source files.
+Please provide a professional, well-structured answer following these guidelines. Organize complex information clearly and prioritize accuracy over brevity.
 
 Answer:
 """
@@ -38,6 +50,9 @@ Answer:
             template=prompt_template,
             input_variables=["context", "question"]
         )
+
+        logger.info("Creating QA chain with custom prompt")
+        logger.debug(f"Creating QA chain with prompt: {prompt_template} with variables {prompt.input_variables}")
         
         try:
             # Use the new LangChain approach first, fall back to legacy if needed
