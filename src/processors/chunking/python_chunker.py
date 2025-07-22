@@ -13,9 +13,8 @@ from .parsers.ast_parser import ASTParser, CodeElement
 import sys
 import os.path
 
-# Add the parent directory to the path to import from utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-from utils.logging import get_logger
+# Import the logger utility from the utils package
+from ...utils.logging import get_logger
 
 logger = get_logger(__name__)
 
