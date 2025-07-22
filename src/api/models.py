@@ -15,6 +15,7 @@ class QueryResponse(BaseModel):
 class IndexRequest(BaseModel):
     repository_urls: List[str]
     branch: Optional[str] = "main"
+    file_patterns: Optional[List[str]] = None
 
 class IndexResponse(BaseModel):
     message: str
@@ -24,9 +25,14 @@ class IndexResponse(BaseModel):
     task_id: Optional[str] = None
 
 class RepositoryInfo(BaseModel):
+    id: Optional[str] = None
     url: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    branch: Optional[str] = "main"
     status: str
-    documents_count: int
+    documents_count: int = 0
+    document_count: Optional[int] = None  # For backward compatibility
     last_indexed: Optional[str] = None
     error: Optional[str] = None
 
