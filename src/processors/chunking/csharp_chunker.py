@@ -180,22 +180,19 @@ class CSharpChunker(BaseChunker):
             class_name = match.group(4)
             start_line = code[:match.start()].count('\n') + 1
             
-            # Find class body end (simplified)
-            class_start = match.end()
-            brace_count = 0
-            class_end = class_start
+            # Find class body using regex for balanced braces
+            class_body_pattern = re.compile(r'\{(?:[^{}]*|(?R))*\}')
+            class_body_match = class_body_pattern.search(code, match.end())
             
-            for i, char in enumerate(code[class_start:], class_start):
-                if char == '{':
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        class_end = i + 1
-                        break
-            
-            end_line = code[:class_end].count('\n') + 1
-            class_content = code[match.start():class_end]
+            if class_body_match:
+                class_end = class_body_match.end()
+                class_content = code[match.start():class_end]
+                end_line = code[:class_end].count('\n') + 1
+            else:
+                logger.warning(f"Could not find class body for {class_name}")
+                class_end = match.end()
+                class_content = code[match.start():class_end]
+                end_line = code[:class_end].count('\n') + 1
             
             elements.append(CSharpElement(
                 name=class_name,
