@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from .models import (
     QueryRequest, QueryResponse, IndexRequest, IndexResponse, 
@@ -17,6 +17,7 @@ from ..vectorstores.chroma_store import ChromaStore
 from ..loaders.github_loader import GitHubLoader
 from ..processors.text_processor import TextProcessor
 from ..agents.rag_agent import RAGAgent
+from langchain.docstore.document import Document
 
 # Setup logging
 setup_logging(settings.log_level)
@@ -225,7 +226,9 @@ async def initialize_components():
         github_loader = GitHubLoader(settings.github_token or "")
         text_processor = TextProcessor(
             chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap
+            chunk_overlap=settings.chunk_overlap,
+            use_enhanced_chunking=settings.use_enhanced_chunking,
+            chunking_config_path=settings.chunking_config_path
         )
         
         logger.info("Knowledge Base Agent API started successfully")
@@ -242,19 +245,6 @@ async def startup_event():
     """Handle startup event"""
     await initialize_components()
     await restore_indexed_repositories()
-
-@app.get("/manual-restore")
-async def manual_restore():
-    """Manual endpoint to trigger repository restoration"""
-    try:
-        await restore_indexed_repositories()
-        return {
-            "message": "Repository restoration completed",
-            "repositories_found": len(indexed_repositories),
-            "repositories": list(indexed_repositories.keys())
-        }
-    except Exception as e:
-        return {"error": str(e)}
 
 @app.post("/query", response_model=QueryResponse)
 async def query_knowledge_base(request: QueryRequest):
@@ -278,7 +268,7 @@ async def query_knowledge_base(request: QueryRequest):
 
 @app.post("/index", response_model=IndexResponse)
 async def index_repository(request: IndexRequest, background_tasks: BackgroundTasks):
-    """Index a GitHub repository"""
+    """Index GitHub repositories"""
     try:
         if not rag_agent:
             raise HTTPException(status_code=500, detail="RAG agent not initialized")
@@ -289,34 +279,76 @@ async def index_repository(request: IndexRequest, background_tasks: BackgroundTa
         if not text_processor:
             raise HTTPException(status_code=500, detail="Text processor not initialized")
         
-        # Check if repository is already indexed
-        repo_name = request.repo_url.split("/")[-1]
-        if repo_name in indexed_repositories:
+        # Check if any repositories are already indexed
+        already_indexed = []
+        to_index = []
+        
+        for repo_url in request.repository_urls:
+            repo_name = repo_url.split("/")[-1]
+            if repo_name in indexed_repositories:
+                already_indexed.append(repo_name)
+            else:
+                to_index.append(repo_url)
+        
+        if not to_index:
             return IndexResponse(
-                message=f"Repository '{repo_name}' is already indexed",
+                message=f"All {len(already_indexed)} repositories are already indexed",
                 status="already_indexed",
-                repository_id=repo_name
+                repositories_processed=len(already_indexed),
+                documents_indexed=0
             )
+        
+        # Generate task ID for tracking
+        import uuid
+        task_id = str(uuid.uuid4())
         
         # Start indexing in the background
         background_tasks.add_task(
-            index_repository_task,
-            request.repo_url,
-            request.branch,
-            request.file_patterns
+            index_repositories_task,
+            to_index,
+            request.branch or "main",
+            request.file_patterns,
+            task_id
         )
         
+        message = f"Started indexing {len(to_index)} repositories"
+        if already_indexed:
+            message += f" ({len(already_indexed)} already indexed)"
+        
         return IndexResponse(
-            message=f"Started indexing repository: {request.repo_url}",
+            message=message,
             status="indexing_started",
-            repository_id=repo_name
+            repositories_processed=0,  # Will be updated when complete
+            documents_indexed=0,       # Will be updated when complete
+            task_id=task_id
         )
     except Exception as e:
         logger.error(f"Error starting repository indexing: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def index_repository_task(repo_url: str, branch: str = "main", file_patterns: List[str] = None):
-    """Background task to index a repository"""
+async def index_repositories_task(repo_urls: List[str], branch: str = "main", file_patterns: Optional[List[str]] = None, task_id: Optional[str] = None):
+    """Background task to index multiple repositories"""
+    total_documents = 0
+    processed_repos = 0
+    
+    for repo_url in repo_urls:
+        try:
+            await index_single_repository_task(repo_url, branch or "main", file_patterns)
+            processed_repos += 1
+            
+            # Get document count for this repository
+            repo_name = repo_url.split("/")[-1]
+            if repo_name in indexed_repositories:
+                total_documents += indexed_repositories[repo_name].documents_count
+                
+        except Exception as e:
+            logger.error(f"Failed to index repository {repo_url}: {str(e)}")
+            continue
+    
+    logger.info(f"Batch indexing completed: {processed_repos}/{len(repo_urls)} repositories, {total_documents} total documents")
+
+async def index_single_repository_task(repo_url: str, branch: str = "main", file_patterns: Optional[List[str]] = None):
+    """Background task to index a single repository"""
     repo_name = repo_url.split("/")[-1]
     
     try:
@@ -327,15 +359,18 @@ async def index_repository_task(repo_url: str, branch: str = "main", file_patter
             name=repo_name,
             description=f"Repository: {repo_url}",
             branch=branch,
-            last_indexed=datetime.now(),
-            document_count=0,
+            last_indexed=datetime.now().isoformat(),
+            documents_count=0,
             status="indexing"
         )
         
         logger.info(f"Starting indexing of repository: {repo_url}")
         
         # Load repository content
-        documents = await github_loader.load_repository(
+        if not github_loader:
+            raise Exception("GitHub loader not initialized")
+            
+        documents = github_loader.load_repository(
             repo_url=repo_url,
             branch=branch,
             file_patterns=file_patterns or ["*.py", "*.js", "*.ts", "*.md", "*.txt"]
@@ -343,30 +378,36 @@ async def index_repository_task(repo_url: str, branch: str = "main", file_patter
         
         if not documents:
             indexed_repositories[repo_name].status = "failed"
+            indexed_repositories[repo_name].error = "No documents found in repository"
             logger.error(f"No documents found in repository: {repo_url}")
             return
         
         # Process documents
-        processed_docs = []
+        if not text_processor:
+            raise Exception("Text processor not initialized")
+            
+        # Add metadata to documents before processing
         for doc in documents:
-            # Add metadata
             doc.metadata.update({
                 "repository": repo_url,
                 "branch": branch,
                 "indexed_at": datetime.now().isoformat()
             })
-            
-            # Process and chunk the document
-            chunks = text_processor.process_document(doc)
-            processed_docs.extend(chunks)
+        
+        # Process and chunk the documents
+        processed_docs = text_processor.process_documents(documents)
         
         # Add to vector store
-        await rag_agent.add_documents(processed_docs)
+        if not rag_agent:
+            raise Exception("RAG agent not initialized")
+            
+        rag_agent.add_documents(processed_docs)
         
         # Update repository info
-        indexed_repositories[repo_name].document_count = len(processed_docs)
+        indexed_repositories[repo_name].documents_count = len(processed_docs)
+        indexed_repositories[repo_name].document_count = len(processed_docs)  # Backward compatibility
         indexed_repositories[repo_name].status = "indexed"
-        indexed_repositories[repo_name].last_indexed = datetime.now()
+        indexed_repositories[repo_name].last_indexed = datetime.now().isoformat()
         
         logger.info(f"Successfully indexed {len(processed_docs)} documents from {repo_url}")
         
@@ -374,6 +415,12 @@ async def index_repository_task(repo_url: str, branch: str = "main", file_patter
         logger.error(f"Error indexing repository {repo_url}: {str(e)}")
         if repo_name in indexed_repositories:
             indexed_repositories[repo_name].status = "failed"
+            indexed_repositories[repo_name].error = str(e)
+
+# Keep the old function for backward compatibility
+async def index_repository_task(repo_url: str, branch: str = "main", file_patterns: Optional[List[str]] = None):
+    """Background task to index a repository (legacy)"""
+    return await index_single_repository_task(repo_url, branch, file_patterns)
 
 @app.get("/repositories")
 async def get_repositories():
@@ -469,10 +516,12 @@ async def get_available_models():
     try:
         from ..config.model_config import ModelConfiguration
         
-        available_models = ModelConfiguration.get_available_models()
+        llm_models = ModelConfiguration.get_llm_recommendations()
+        embedding_models = ModelConfiguration.get_model_recommendations()
+        
         return {
-            "llm_models": available_models["llm"],
-            "embedding_models": available_models["embedding"]
+            "llm_models": llm_models,
+            "embedding_models": embedding_models
         }
     except Exception as e:
         logger.error(f"Error getting available models: {str(e)}")

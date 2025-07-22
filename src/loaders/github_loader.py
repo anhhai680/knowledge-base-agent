@@ -1,11 +1,13 @@
 import os
 import tempfile
 import shutil
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 import git
 from langchain.docstore.document import Document
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
+
+from src.config import settings
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -15,13 +17,9 @@ class GitHubLoader:
     
     def __init__(self, github_token: str = None):
         self.github_token = github_token
-        self.supported_extensions = {
-            '.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.h', 
-            '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala',
-            '.md', '.txt', '.rst', '.yml', '.yaml', '.json', '.xml', '.sql'
-        }
+        self.supported_extensions = settings.settings.github_supported_file_extensions
     
-    def load_repository(self, repo_url: str, branch: str = "main") -> List[Document]:
+    def load_repository(self, repo_url: str, branch: str = "main", file_patterns: Optional[List[str]] = None) -> List[Document]:
         """Load documents from GitHub repository"""
         logger.info(f"Loading repository: {repo_url}")
         
@@ -50,7 +48,7 @@ class GitHubLoader:
                     logger.warning(f"Could not checkout branch {branch}, using default: {str(e)}")
             
             # Load documents
-            documents = self._load_files_from_directory(clone_path, repo_url)
+            documents = self._load_files_from_directory(clone_path, repo_url, file_patterns)
             
             logger.info(f"Loaded {len(documents)} documents from repository")
             return documents
@@ -64,9 +62,21 @@ class GitHubLoader:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
     
-    def _load_files_from_directory(self, directory_path: str, repo_url: str) -> List[Document]:
+    def _load_files_from_directory(self, directory_path: str, repo_url: str, file_patterns: Optional[List[str]] = None) -> List[Document]:
         """Load files from directory"""
+        import fnmatch
+        
         documents = []
+        
+        # If file_patterns provided, use them; otherwise use supported extensions
+        if file_patterns:
+            # Convert patterns to a set of allowed extensions for efficiency
+            pattern_extensions = set()
+            for pattern in file_patterns:
+                if pattern.startswith("*."):
+                    pattern_extensions.add(pattern[1:])  # Remove the "*" prefix
+        else:
+            pattern_extensions = self.supported_extensions
         
         for root, dirs, files in os.walk(directory_path):
             # Skip common directories
@@ -78,9 +88,21 @@ class GitHubLoader:
                 file_path = os.path.join(root, file)
                 relative_path = os.path.relpath(file_path, directory_path)
                 
-                # Check if file extension is supported
+                # Check if file matches patterns
                 file_ext = Path(file).suffix.lower()
-                if file_ext not in self.supported_extensions:
+                matches_pattern = False
+                
+                if file_patterns:
+                    # Check against provided patterns
+                    for pattern in file_patterns:
+                        if fnmatch.fnmatch(file, pattern) or fnmatch.fnmatch(relative_path, pattern):
+                            matches_pattern = True
+                            break
+                else:
+                    # Check against supported extensions
+                    matches_pattern = file_ext in self.supported_extensions
+                
+                if not matches_pattern:
                     continue
                 
                 # Skip files that are too large (> 1MB)
@@ -112,7 +134,3 @@ class GitHubLoader:
                     continue
         
         return documents
-    
-    def get_supported_extensions(self) -> set:
-        """Get supported file extensions"""
-        return self.supported_extensions

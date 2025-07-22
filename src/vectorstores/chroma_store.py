@@ -1,4 +1,5 @@
 from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores.utils import filter_complex_metadata
 from langchain.schema import Document
 from typing import List, Dict, Any, Optional
 import chromadb
@@ -217,15 +218,95 @@ class ChromaStore(BaseVectorStore):
             logger.error(f"Failed to recreate persistent collection: {str(e)}")
             raise
     
+    def _filter_document_metadata(self, documents: List[Document]) -> List[Document]:
+        """
+        Filter complex metadata from documents to ensure ChromaDB compatibility.
+        
+        Args:
+            documents: List of documents to filter
+            
+        Returns:
+            List of documents with filtered metadata
+        """
+        filtered_documents = []
+        
+        for doc in documents:
+            try:
+                # Use LangChain's built-in metadata filtering first
+                filtered_docs = filter_complex_metadata([doc])
+                if filtered_docs:
+                    filtered_documents.extend(filtered_docs)
+                    continue
+            except Exception as filter_error:
+                logger.debug(f"filter_complex_metadata failed: {str(filter_error)}")
+            
+            # Fallback: manually filter known complex types
+            filtered_metadata = {}
+            for key, value in doc.metadata.items():
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    filtered_metadata[key] = value
+                elif isinstance(value, list):
+                    # Convert lists to strings for ChromaDB compatibility
+                    if all(isinstance(item, str) for item in value):
+                        filtered_metadata[key] = ", ".join(value)
+                    else:
+                        filtered_metadata[key] = str(value)
+                elif isinstance(value, dict):
+                    # Convert dicts to strings
+                    filtered_metadata[key] = str(value)
+                else:
+                    # Convert other complex types to strings
+                    filtered_metadata[key] = str(value)
+            
+            filtered_doc = Document(
+                page_content=doc.page_content,
+                metadata=filtered_metadata
+            )
+            filtered_documents.append(filtered_doc)
+        
+        return filtered_documents
+
     def add_documents(self, documents: List[Document]) -> List[str]:
-        """Add documents to Chroma vector store"""
+        """Add documents to Chroma vector store with batch processing to avoid token limits"""
         try:
             # Ensure collection metadata is up to date
             self._update_collection_metadata()
             
-            ids = self.vector_store.add_documents(documents)
-            logger.info(f"Added {len(ids)} documents to ChromaStore")
-            return ids
+            # Filter complex metadata from documents before adding to Chroma
+            filtered_documents = self._filter_document_metadata(documents)
+            
+            # Implement batch processing to avoid token limits
+            all_ids = []
+            batch_size = self._calculate_optimal_batch_size(filtered_documents)
+            
+            logger.info(f"Processing {len(filtered_documents)} documents in batches of {batch_size}")
+            
+            for i in range(0, len(filtered_documents), batch_size):
+                batch = filtered_documents[i:i + batch_size]
+                
+                try:
+                    # Estimate tokens for this batch
+                    batch_tokens = self._estimate_batch_tokens(batch)
+                    logger.debug(f"Batch {i//batch_size + 1}: {len(batch)} documents, ~{batch_tokens} tokens")
+                    
+                    # Add batch to vector store
+                    batch_ids = self.vector_store.add_documents(batch)
+                    all_ids.extend(batch_ids)
+                    
+                except Exception as batch_e:
+                    # Check if it's a token limit error and reduce batch size
+                    if "max_tokens_per_request" in str(batch_e).lower() or "413" in str(batch_e):
+                        logger.warning(f"Token limit exceeded for batch, reducing batch size and retrying")
+                        # Recursively process with smaller batches
+                        smaller_batch_ids = self._process_with_reduced_batch_size(batch)
+                        all_ids.extend(smaller_batch_ids)
+                    else:
+                        # Re-raise other errors
+                        raise batch_e
+            
+            logger.info(f"Added {len(all_ids)} documents to ChromaStore in {(len(filtered_documents) + batch_size - 1) // batch_size} batches")
+            return all_ids
+            
         except Exception as e:
             error_msg = f"Failed to add documents to Chroma: {str(e)}"
             logger.error(error_msg)
@@ -235,8 +316,9 @@ class ChromaStore(BaseVectorStore):
                 logger.warning("Dimension mismatch detected. Attempting to recreate collection.")
                 try:
                     self._handle_dimension_mismatch()
-                    # Retry adding documents
-                    ids = self.vector_store.add_documents(documents)
+                    # Retry adding documents with filtered metadata and batching
+                    retry_filtered_documents = self._filter_document_metadata(documents)
+                    ids = self.add_documents(retry_filtered_documents)  # Recursive call with batching
                     logger.info(f"Successfully added {len(ids)} documents after collection recreation")
                     return ids
                 except Exception as retry_e:
@@ -244,6 +326,106 @@ class ChromaStore(BaseVectorStore):
                     logger.error(error_msg)
             
             raise Exception(error_msg)
+    
+    def _calculate_optimal_batch_size(self, documents: List[Document]) -> int:
+        """
+        Calculate optimal batch size based on document content and token limits.
+        
+        Args:
+            documents: List of documents to analyze
+            
+        Returns:
+            Optimal batch size to stay under token limits
+        """
+        from ..config.settings import settings
+        
+        if not documents:
+            return settings.embedding_batch_size  # Use configured default
+        
+        # Sample a few documents to estimate average token count
+        sample_size = min(5, len(documents))
+        sample_documents = documents[:sample_size]
+        
+        total_tokens = 0
+        for doc in sample_documents:
+            # Rough estimate: 1 token ~= 4 characters for English text
+            estimated_tokens = len(doc.page_content) // 4
+            total_tokens += estimated_tokens
+        
+        avg_tokens_per_doc = total_tokens / sample_size if sample_size > 0 else 1000
+        
+        # Use configured token limit
+        safe_token_limit = settings.max_tokens_per_batch
+        
+        # Calculate batch size
+        optimal_batch_size = max(1, int(safe_token_limit / avg_tokens_per_doc))
+        
+        # Cap at configured batch size and reasonable maximum
+        optimal_batch_size = min(optimal_batch_size, settings.embedding_batch_size, 100)
+        
+        logger.debug(f"Calculated optimal batch size: {optimal_batch_size} (avg tokens per doc: {avg_tokens_per_doc:.0f})")
+        
+        return optimal_batch_size
+    
+    def _estimate_batch_tokens(self, batch: List[Document]) -> int:
+        """
+        Estimate total tokens for a batch of documents.
+        
+        Args:
+            batch: List of documents to estimate
+            
+        Returns:
+            Estimated token count for the batch
+        """
+        total_tokens = 0
+        for doc in batch:
+            # Rough estimate: 1 token ~= 4 characters for English text
+            # Add some overhead for metadata
+            content_tokens = len(doc.page_content) // 4
+            metadata_tokens = len(str(doc.metadata)) // 4
+            total_tokens += content_tokens + metadata_tokens + 10  # Small buffer per document
+        
+        return total_tokens
+    
+    def _process_with_reduced_batch_size(self, failed_batch: List[Document]) -> List[str]:
+        """
+        Process a failed batch with progressively smaller batch sizes.
+        
+        Args:
+            failed_batch: Batch that failed due to token limits
+            
+        Returns:
+            List of document IDs that were successfully added
+        """
+        all_ids = []
+        current_batch_size = max(1, len(failed_batch) // 2)  # Start with half the original size
+        
+        logger.info(f"Retrying failed batch of {len(failed_batch)} documents with reduced batch size: {current_batch_size}")
+        
+        for i in range(0, len(failed_batch), current_batch_size):
+            batch = failed_batch[i:i + current_batch_size]
+            
+            try:
+                batch_ids = self.vector_store.add_documents(batch)
+                all_ids.extend(batch_ids)
+                logger.debug(f"Successfully processed reduced batch: {len(batch)} documents")
+                
+            except Exception as e:
+                if "max_tokens_per_request" in str(e).lower() or "413" in str(e):
+                    # If still too large, process documents individually
+                    if len(batch) == 1:
+                        # Single document is too large - log warning and skip
+                        logger.warning(f"Skipping document that is too large: {batch[0].metadata.get('file_path', 'unknown')}")
+                        continue
+                    else:
+                        # Recursively reduce batch size further
+                        recursive_ids = self._process_with_reduced_batch_size(batch)
+                        all_ids.extend(recursive_ids)
+                else:
+                    # Other error, re-raise
+                    raise e
+        
+        return all_ids
     
     def _update_collection_metadata(self):
         """Update collection metadata with current embedding model info"""
