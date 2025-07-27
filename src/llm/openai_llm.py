@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any
 from langchain_openai import ChatOpenAI
 from ..utils.logging import get_logger
 

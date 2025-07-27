@@ -12,12 +12,11 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-# RUN pip install --no-cache-dir --upgrade pip && \
-#     pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies (this layer will be cached unless requirements.txt changes)
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code (this layer only runs if code changes, not requirements)
 COPY src/ ./src/
 COPY main.py .
 COPY verify_startup.py .
