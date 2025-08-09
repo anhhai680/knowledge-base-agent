@@ -23,7 +23,7 @@ services:
       - CHUNK_SIZE=${CHUNK_SIZE:-1000}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
       - MAX_TOKENS=${MAX_TOKENS:-4000}
-      - TEMPERATURE=${TEMPERATURE:-0.7}
+      - TEMPERATURE=${TEMPERATURE:-0.2}
     env_file:
       - .env
     depends_on:
@@ -57,12 +57,14 @@ services:
     restart: unless-stopped
 
   # Optional: Add a simple web UI for development
-  ui:
-    build: ./ui
+  web:
+    build: ./web
     ports:
       - "3000:3000"
     environment:
       - REACT_APP_API_URL=http://localhost:8000
+    volumes:
+      - ./web/index.html:/usr/share/nginx/html/index.html
     depends_on:
       - knowledge-base-agent
 
