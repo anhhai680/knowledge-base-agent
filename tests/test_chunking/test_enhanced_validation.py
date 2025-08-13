@@ -329,31 +329,35 @@ more_content = "Even with syntax errors above"
     
     def test_unsupported_file_type_fallback(self):
         """Test fallback to traditional chunking for unsupported file types."""
-        javascript_code = '''
-// JavaScript code - not yet supported by enhanced chunking
-function calculateSum(a, b) {
-    return a + b;
+        go_code = '''
+// Go code - not supported by enhanced chunking
+package main
+
+import "fmt"
+
+func calculateSum(a, b int) int {
+    return a + b
 }
 
-class Calculator {
-    constructor() {
-        this.history = [];
-    }
-    
-    add(a, b) {
-        const result = a + b;
-        this.history.push({operation: 'add', result});
-        return result;
-    }
+type Calculator struct {
+    history []string
 }
 
-const calc = new Calculator();
-console.log(calc.add(5, 3));
+func (c *Calculator) Add(a, b int) int {
+    result := a + b
+    c.history = append(c.history, fmt.Sprintf("add: %d + %d = %d", a, b, result))
+    return result
+}
+
+func main() {
+    calc := &Calculator{}
+    fmt.Println(calc.Add(5, 3))
+}
 '''
         
         doc = Document(
-            page_content=javascript_code,
-            metadata={"file_path": "script.js", "file_type": ".js", "source": "test"}
+            page_content=go_code,
+            metadata={"file_path": "script.go", "file_type": ".go", "source": "test"}
         )
         
         # Should use fallback chunker

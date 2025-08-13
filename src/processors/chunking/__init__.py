@@ -10,11 +10,15 @@ from .chunking_factory import ChunkingFactory
 from .fallback_chunker import FallbackChunker
 from .python_chunker import PythonChunker
 from .csharp_chunker import CSharpChunker
+from .javascript_chunker import JavaScriptChunker
+from .typescript_chunker import TypeScriptChunker
 
 __all__ = [
     "BaseChunker",
     "ChunkingFactory", 
     "FallbackChunker",
     "PythonChunker",
-    "CSharpChunker"
+    "CSharpChunker",
+    "JavaScriptChunker",
+    "TypeScriptChunker"
 ]
