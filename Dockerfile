@@ -12,12 +12,11 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-# RUN pip install --no-cache-dir --upgrade pip && \
-#     pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies (this layer will be cached unless requirements.txt changes)
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application code (this layer only runs if code changes, not requirements)
 COPY src/ ./src/
 COPY main.py .
 COPY verify_startup.py .
@@ -33,9 +32,9 @@ RUN mkdir -p ./chroma_db
 ENV APP_ENV=production
 ENV LLM_PROVIDER=ollama
 ENV LLM_MODEL=llama3.2:3b
-ENV LLM_API_BASE_URL=http://ollama:11434/v1
+# ENV LLM_API_BASE_URL=http://ollama:11434/v1
 ENV EMBEDDING_MODEL=nomic-embed-text
-ENV EMBEDDING_API_BASE_URL=http://ollama:11434/v1/embeddings
+# ENV EMBEDDING_API_BASE_URL=http://ollama:11434/v1/embeddings
 ENV LOG_LEVEL=INFO
 ENV API_HOST=0.0.0.0
 ENV API_PORT=8000
@@ -44,7 +43,7 @@ ENV CHROMA_PORT=8000
 ENV CHUNK_SIZE=1000
 ENV CHUNK_OVERLAP=200
 ENV MAX_TOKENS=4000
-ENV TEMPERATURE=0.8
+ENV TEMPERATURE=0.2
 
 # Expose port
 EXPOSE 8000

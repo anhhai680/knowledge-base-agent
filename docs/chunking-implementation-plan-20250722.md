@@ -64,6 +64,8 @@ Transform the current length-based document chunking strategy to an intelligent 
 # 4. Remaining code blocks
 ```
 
+**Recommendation**: Consider migrating from regex-based parsing to tree-sitter for improved accuracy with complex C# features like generics, LINQ, attributes, and XML documentation. See [Tree-sitter Implementation Plan](./tree-sitter-implementation-plan.md) for migration strategy.
+
 #### Python Chunker (`python_chunker.py`)
 ```python
 # Extract chunks in this order:
@@ -82,6 +84,8 @@ Transform the current length-based document chunking strategy to an intelligent 
 # 4. Export statements
 ```
 
+**Recommendation**: Use tree-sitter parsers for JavaScript and TypeScript instead of regex-based parsing. Tree-sitter provides superior accuracy for complex syntax like JSX, async/await, generics, and modern ES6+ features. See [Tree-sitter Implementation Plan](./tree-sitter-implementation-plan.md) for implementation details.
+
 #### Markdown Chunker (`markdown_chunker.py`)
 ```python
 # Extract chunks in this order:
@@ -95,7 +99,7 @@ Transform the current length-based document chunking strategy to an intelligent 
 **Files to Create/Modify:**
 - `src/processors/chunking/parsers/` (new directory)
 - `src/processors/chunking/parsers/ast_parser.py`
-- `src/processors/chunking/parsers/tree_sitter_parser.py` (optional)
+- `src/processors/chunking/parsers/tree_sitter_parser.py` (recommended for C#, JS, TS)
 
 **Tasks:**
 1. Implement AST-based parsing for supported languages using Python's `ast` module
@@ -106,6 +110,8 @@ Transform the current length-based document chunking strategy to an intelligent 
    - Documentation strings
 3. Extract line numbers and character positions for precise chunking
 4. Handle syntax errors gracefully with fallback to regex-based parsing
+
+**Note**: For C#, JavaScript, and TypeScript, consider implementing tree-sitter parsers instead of regex-based approaches. See the [Tree-sitter Implementation Plan](./tree-sitter-implementation-plan.md) for detailed guidance on integrating tree-sitter for superior parsing accuracy and maintainability.
 
 ### Step 4: Configuration System Enhancement
 **Files to Modify:**
@@ -267,3 +273,7 @@ chunking:
 4. **Team Knowledge**: Documentation and knowledge transfer
 
 This implementation plan provides a comprehensive roadmap for transitioning from length-based to semantic file extension-based chunking, ensuring improved AI Agent performance while maintaining system reliability and extensibility.
+
+## Related Documentation
+
+- **[Tree-sitter Implementation Plan](./tree-sitter-implementation-plan.md)**: Detailed plan for implementing tree-sitter parsers for C#, JavaScript, and TypeScript, which provides superior parsing accuracy compared to regex-based approaches.

@@ -6,15 +6,9 @@ and creates chunks that respect namespace, class, and method boundaries.
 """
 
 import re
-from typing import List, Dict, Any, Optional, NamedTuple
+from typing import List, Optional, NamedTuple
 from langchain.docstore.document import Document
-
 from .base_chunker import BaseChunker, ChunkMetadata
-import sys
-import os.path
-
-# Add the parent directory to the path to import from utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -129,7 +123,7 @@ class CSharpChunker(BaseChunker):
             # Ensure cleaned_content is available for fallback
             if 'cleaned_content' not in locals():
                 cleaned_content = self._clean_content(document.page_content)
-            return self._fallback_chunk(document, cleaned_content)
+            return self._fallback_chunk(document, cleaned_content) # type: ignore
     
     def _parse_csharp_code(self, code: str) -> List[CSharpElement]:
         """
