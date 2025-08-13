@@ -14,6 +14,9 @@ from .semantic_element import (
     AccessModifier
 )
 from .advanced_parser import AdvancedParser, ParsingError, TreeSitterError, FallbackError
+from .csharp_parser import CSharpAdvancedParser
+from .javascript_parser import JavaScriptAdvancedParser
+from .typescript_parser import TypeScriptAdvancedParser
 
 __all__ = [
     'ASTParser',
@@ -25,5 +28,8 @@ __all__ = [
     'AdvancedParser',
     'ParsingError',
     'TreeSitterError', 
-    'FallbackError'
+    'FallbackError',
+    'CSharpAdvancedParser',
+    'JavaScriptAdvancedParser',
+    'TypeScriptAdvancedParser'
 ]
