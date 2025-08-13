@@ -112,30 +112,30 @@ class TypeScriptChunker(JavaScriptChunker):
                     current_group.append(element)
             
             elif element.element_type == ElementType.TYPE_ALIAS:
-                # Type aliases can be grouped with related types
+                # Type aliases can be grouped with related types or standalone
                 if current_group and all(e.element_type in [ElementType.TYPE_ALIAS, ElementType.INTERFACE] for e in current_group):
                     current_group.append(element)
+                    # Check if we should split based on size or if we have too many types
+                    if self._estimate_group_size(current_group) > self.max_chunk_size * 0.6 or len(current_group) >= 3:
+                        groups.append(current_group)
+                        current_group = []
                 else:
                     if current_group:
                         groups.append(current_group)
-                        current_group = [element]
-                    else:
-                        current_group.append(element)
+                    current_group = [element]
             
             elif element.element_type == ElementType.INTERFACE:
                 # Interfaces can be grouped with related interfaces or type aliases
                 if current_group and all(e.element_type in [ElementType.TYPE_ALIAS, ElementType.INTERFACE] for e in current_group):
                     current_group.append(element)
                     # Check if we should split based on size
-                    if self._estimate_group_size(current_group) > self.max_chunk_size * 0.7:
+                    if self._estimate_group_size(current_group) > self.max_chunk_size * 0.6:
                         groups.append(current_group)
                         current_group = []
                 else:
                     if current_group:
                         groups.append(current_group)
-                        current_group = [element]
-                    else:
-                        current_group.append(element)
+                    current_group = [element]
             
             elif element.element_type == ElementType.ENUM:
                 # Enums get their own chunk or can be grouped with related types

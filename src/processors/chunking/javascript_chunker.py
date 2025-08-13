@@ -204,20 +204,29 @@ class JavaScriptChunker(BaseChunker):
                 groups.append([element])
             
             elif element.element_type in [ElementType.FUNCTION, ElementType.VARIABLE, ElementType.CONSTANT]:
-                # Functions and variables can be grouped together if they're related
-                current_group.append(element)
-                
-                # Check if we should start a new group based on size or semantic separation
-                if self._estimate_group_size(current_group) > self.max_chunk_size * 0.8:
-                    groups.append(current_group)
-                    current_group = []
+                # Functions and variables can be grouped together if they're small, otherwise separate
+                if element.element_type == ElementType.FUNCTION and len(element.content) > self.max_chunk_size * 0.5:
+                    # Large functions get their own chunk
+                    if current_group:
+                        groups.append(current_group)
+                        current_group = []
+                    groups.append([element])
+                else:
+                    current_group.append(element)
+                    
+                    # Check if we should start a new group based on size
+                    if self._estimate_group_size(current_group) > self.max_chunk_size * 0.8:
+                        groups.append(current_group)
+                        current_group = []
             
             elif element.element_type == ElementType.COMMENT:
-                # Comments can be included with the next group if it's small
-                if len(current_group) < 3:
+                # Comments should not dominate the chunk type - only include if current group is small
+                if len(current_group) == 0:
+                    current_group.append(element)
+                elif len(current_group) == 1 and current_group[0].element_type == ElementType.COMMENT:
                     current_group.append(element)
                 else:
-                    # Start a new group if current one is already substantial
+                    # Start a new group for the comment
                     groups.append(current_group)
                     current_group = [element]
             
@@ -354,3 +363,19 @@ class JavaScriptChunker(BaseChunker):
         for element in elements:
             total_size += len(element.content)
         return total_size
+    
+    def _fallback_chunk(self, document: Document, content: str) -> List[Document]:
+        """
+        Create chunks using fallback text-based chunking.
+        
+        Args:
+            document: Original document
+            content: Content to chunk
+            
+        Returns:
+            List of fallback chunks
+        """
+        from .fallback_chunker import FallbackChunker
+        temp_doc = Document(page_content=content, metadata=document.metadata)
+        fallback_chunker = FallbackChunker(self.max_chunk_size, self.chunk_overlap)
+        return fallback_chunker.chunk_document(temp_doc)
