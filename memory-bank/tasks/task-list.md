@@ -4,6 +4,7 @@
 - [TASK014] Enhanced Chunking File Improvements - Optimizing chunking strategies for different file types and better code understanding
 
 ## Pending
+- [TASK015] Tree-sitter Integration for Enhanced Parsing - Implement tree-sitter parsers for C#, JavaScript, and TypeScript to replace regex-based parsing
 - [TASK002] Enhance Answer Formatting - Improve response readability and code highlighting
 - [TASK003] Implement Performance Monitoring - Add system observability and metrics tracking
 - [TASK004] Advanced Web Interface - Modern React/Vue.js frontend with conversation history
