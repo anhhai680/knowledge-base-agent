@@ -54,6 +54,7 @@ class TypeScriptChunker(JavaScriptChunker):
             self.use_advanced_parsing = settings.use_advanced_parsing
         else:
             self.use_advanced_parsing = use_advanced_parsing
+        super().__init__(max_chunk_size, chunk_overlap, use_advanced_parsing=use_advanced_parsing)
         
         # Initialize TypeScript advanced parser
         self.advanced_parser = None
