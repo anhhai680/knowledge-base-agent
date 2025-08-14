@@ -123,11 +123,13 @@ class DiagramHandler:
             repositories = self._extract_repositories_from_query(query)
             
             if repositories:
-                logger.info(f"User requested repositories: {repositories}")
+                print(f"REPO DEBUG PRINT: User requested repositories: {repositories}")
+                logger.info(f"REPO DEBUG: User requested repositories: {repositories}")
                 
                 # First, check which repositories actually exist in the database
                 available_repos = self._get_available_repositories()
-                logger.info(f"Available repositories in database: {available_repos}")
+                print(f"REPO DEBUG PRINT: Available repositories in database: {available_repos}")
+                logger.info(f"REPO DEBUG: Available repositories in database: {available_repos}")
                 
                 # Find matching repositories (case-insensitive, partial matching)
                 matching_repos = []
@@ -135,25 +137,33 @@ class DiagramHandler:
                     for available_repo in available_repos:
                         if self._is_repository_match(available_repo, [requested_repo]):
                             matching_repos.append(available_repo)
+                            print(f"REPO DEBUG PRINT: Matched '{requested_repo}' to '{available_repo}'")
+                            logger.info(f"REPO DEBUG: Matched '{requested_repo}' to '{available_repo}'")
                             break
                 
                 if not matching_repos:
-                    logger.warning(f"None of the requested repositories {repositories} were found in the database")
-                    logger.info(f"Available repositories: {available_repos}")
+                    print(f"REPO DEBUG PRINT: None of the requested repositories {repositories} were found")
+                    logger.warning(f"REPO DEBUG: None of the requested repositories {repositories} were found")
+                    logger.info(f"REPO DEBUG: Available repositories: {available_repos}")
                     # Return empty list so the handler can provide a helpful error message
                     return []
                 
-                logger.info(f"Found matching repositories: {matching_repos}")
+                print(f"REPO DEBUG PRINT: Found matching repositories: {matching_repos}")
+                logger.info(f"REPO DEBUG: Found matching repositories: {matching_repos}")
                 
                 # Search with repository filter using OR logic across repositories
                 all_results = []
                 for repo in matching_repos:
                     try:
+                        print(f"REPO DEBUG PRINT: Searching repository: {repo}")
+                        logger.info(f"REPO DEBUG: Searching repository: {repo}")
                         repo_results = self.vectorstore.similarity_search(
                             query=query,
                             k=20,  # Get more results per repository
                             filter={"repository": repo}  # Filter by specific repository
                         )
+                        print(f"REPO DEBUG PRINT: Found {len(repo_results)} results in {repo}")
+                        logger.info(f"REPO DEBUG: Found {len(repo_results)} results in {repo}")
                         all_results.extend(repo_results)
                         logger.debug(f"Found {len(repo_results)} documents in repository: {repo}")
                     except Exception as repo_error:
@@ -161,11 +171,15 @@ class DiagramHandler:
                 
                 results = all_results
             else:
+                logger.info("REPO DEBUG: No specific repositories mentioned, searching all")
                 # No specific repositories mentioned, search all
                 results = self.vectorstore.similarity_search(
                     query=query,
                     k=20  # Get more results for comprehensive analysis
                 )
+            
+            logger.info(f"REPO DEBUG: Total results before language filtering: {len(results)}")
+            print(f"REPO DEBUG PRINT: Total results before language filtering: {len(results)}")
             
             # Filter for supported languages using existing metadata
             supported_languages = {'python', 'javascript', 'typescript', 'csharp'}
@@ -177,16 +191,25 @@ class DiagramHandler:
                 if language == 'unknown':
                     language = self._detect_language_from_path(doc.metadata.get('file_path', ''))
                 
+                print(f"REPO DEBUG PRINT: Document {doc.metadata.get('file_path', 'unknown')} language: {language}")
+                
                 if language in supported_languages:
                     # Additional filtering to ensure we're getting relevant repositories
                     if repositories:
                         doc_repository = doc.metadata.get('repository', '')
+                        print(f"REPO DEBUG PRINT: Checking repository match: {doc_repository} vs {repositories}")
                         if self._is_repository_match(doc_repository, repositories):
                             filtered_results.append(doc)
+                            print(f"REPO DEBUG PRINT: Added document from {doc_repository}")
+                        else:
+                            print(f"REPO DEBUG PRINT: Repository mismatch for {doc_repository}")
                     else:
                         filtered_results.append(doc)
+                else:
+                    print(f"REPO DEBUG PRINT: Language {language} not supported for {doc.metadata.get('file_path', 'unknown')}")
             
             logger.info(f"Found {len(filtered_results)} relevant code documents out of {len(results)} total")
+            print(f"REPO DEBUG PRINT: Found {len(filtered_results)} relevant code documents out of {len(results)} total")
             return filtered_results[:15]  # Limit for processing efficiency
             
         except Exception as e:
@@ -379,34 +402,41 @@ class DiagramHandler:
     def _get_available_repositories(self) -> List[str]:
         """Get list of all available repositories in the vector database"""
         try:
-            # Get a sample of documents to extract repository information
-            sample_docs = self.vectorstore.similarity_search("", k=100)  # Get many documents
             repositories = set()
+            
+            # Try direct collection access first for more comprehensive results
+            if hasattr(self.vectorstore, 'vector_store') and hasattr(self.vectorstore.vector_store, '_collection'):
+                try:
+                    collection = self.vectorstore.vector_store._collection
+                    # Get all metadata from collection
+                    results = collection.get(limit=10000, include=['metadatas'])
+                    if results and 'metadatas' in results:
+                        for metadata in results['metadatas']:
+                            if metadata and 'repository' in metadata:
+                                repositories.add(metadata['repository'])
+                    
+                    if repositories:
+                        result = list(repositories)
+                        print(f"REPO DEBUG PRINT: _get_available_repositories (direct) returning: {result}")
+                        return result
+                except Exception as direct_error:
+                    print(f"REPO DEBUG PRINT: Direct collection access failed: {str(direct_error)}")
+            
+            # Fallback to similarity search
+            sample_docs = self.vectorstore.similarity_search("", k=100)  # Get many documents
             
             for doc in sample_docs:
                 repo = doc.metadata.get('repository')
                 if repo:
                     repositories.add(repo)
             
-            return list(repositories)
+            result = list(repositories)
+            print(f"REPO DEBUG PRINT: _get_available_repositories (similarity) returning: {result}")
+            return result
             
         except Exception as e:
+            print(f"REPO DEBUG PRINT: _get_available_repositories failed: {str(e)}")
             logger.error(f"Failed to get available repositories: {str(e)}")
-            # Fallback: try to query the collection directly if possible
-            try:
-                if hasattr(self.vectorstore, 'vector_store') and hasattr(self.vectorstore.vector_store, '_collection'):
-                    collection = self.vectorstore.vector_store._collection
-                    # Get metadata from a larger sample
-                    results = collection.get(limit=500, include=['metadatas'])
-                    repositories = set()
-                    for metadata in results['metadatas']:
-                        repo = metadata.get('repository')
-                        if repo:
-                            repositories.add(repo)
-                    return list(repositories)
-            except Exception as fallback_error:
-                logger.error(f"Fallback repository query also failed: {str(fallback_error)}")
-            
             return []
     
     def _get_repositories_with_code(self) -> List[str]:

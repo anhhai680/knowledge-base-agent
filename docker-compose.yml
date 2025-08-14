@@ -32,6 +32,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./chroma_db:/app/chroma_db
+      - ./src:/app/src  # Mount source code for development
     restart: unless-stopped
   
   ollama:
