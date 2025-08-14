@@ -12,7 +12,7 @@ from .javascript_chunker import JavaScriptChunker
 from .base_chunker import ChunkMetadata
 from .parsers.typescript_parser import TypeScriptAdvancedParser
 from .parsers.semantic_element import SemanticElement, ElementType, ParseResult
-from .parsers.advanced_parser import FallbackError, TreeSitterError
+from .parsers.advanced_parser import FallbackError, AdvancedParserError
 from utils.logging import get_logger
 
 logger = get_logger(__name__)

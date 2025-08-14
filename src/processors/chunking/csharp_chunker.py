@@ -12,7 +12,7 @@ from langchain.docstore.document import Document
 from .base_chunker import BaseChunker, ChunkMetadata
 from .parsers.csharp_parser import CSharpAdvancedParser
 from .parsers.semantic_element import SemanticElement, ElementType, ParseResult
-from .parsers.advanced_parser import FallbackError, TreeSitterError
+from .parsers.advanced_parser import FallbackError, AdvancedParserError
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -115,7 +115,7 @@ class CSharpChunker(BaseChunker):
             if self.use_advanced_parsing and self.advanced_parser:
                 try:
                     return self._chunk_with_advanced_parsing(document, cleaned_content)
-                except (FallbackError, TreeSitterError) as e:
+                except (FallbackError, AdvancedParserError) as e:
                     logger.warning(f"Advanced parsing failed, falling back to regex: {e}")
                 except Exception as e:
                     logger.error(f"Unexpected error in advanced parsing: {e}")

@@ -29,8 +29,8 @@ class ParsingError(Exception):
     pass
 
 
-class TreeSitterError(ParsingError):
-    """Exception for tree-sitter specific errors."""
+class AdvancedParserError(ParsingError):
+    """Exception for advanced parser specific errors."""
     pass
 
 
@@ -81,7 +81,7 @@ class AdvancedParser(ABC):
             logger.debug(f"Initialized tree-sitter parser for {self.language_name}")
         except Exception as e:
             logger.error(f"Failed to initialize tree-sitter parser for {self.language_name}: {e}")
-            raise TreeSitterError(f"Parser initialization failed: {e}")
+            raise AdvancedParserError(f"Parser initialization failed: {e}")
     
     @abstractmethod
     def _get_tree_sitter_language(self) -> ts.Language:
@@ -182,7 +182,7 @@ class AdvancedParser(ABC):
             Parsed tree-sitter tree
         """
         if not self._parser:
-            raise TreeSitterError("Parser not initialized")
+            raise AdvancedParserError("Parser not initialized")
         
         try:
             # Convert to bytes for tree-sitter
@@ -190,7 +190,7 @@ class AdvancedParser(ABC):
             tree = self._parser.parse(source_bytes)
             return tree
         except Exception as e:
-            raise TreeSitterError(f"Tree-sitter parsing failed: {e}")
+            raise AdvancedParserError(f"Tree-sitter parsing failed: {e}")
     
     def _validate_elements(self, elements: List[SemanticElement], source_code: str) -> None:
         """
