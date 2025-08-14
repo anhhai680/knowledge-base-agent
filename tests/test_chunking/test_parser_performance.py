@@ -289,6 +289,7 @@ export enum ResponseStatus {
         import psutil
         import os
         
+        
         process = psutil.Process(os.getpid())
         initial_memory = process.memory_info().rss / 1024 / 1024  # MB
         
