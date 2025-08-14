@@ -11,6 +11,9 @@ class QueryResponse(BaseModel):
     status: str
     num_sources: int
     error: Optional[str] = None
+    # Extended fields for diagram responses
+    mermaid_code: Optional[str] = None
+    diagram_type: Optional[str] = None
 
 class IndexRequest(BaseModel):
     repository_urls: List[str]

@@ -208,9 +208,35 @@
             white-space: pre-wrap;
             word-wrap: break-word;
         }
+        /* Mermaid diagram styles */
+        .diagram-container {
+            margin: 1rem 0;
+            padding: 1rem;
+            background-color: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        .diagram-title {
+            font-weight: bold;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }
+        .mermaid {
+            text-align: center;
+        }
+        .diagram-error {
+            color: #dc2626;
+            background-color: #fef2f2;
+            padding: 0.5rem;
+            border-radius: 4px;
+            margin: 0.5rem 0;
+        }
     </style>
     <!-- Include marked.js for Markdown rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js "></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Include Mermaid.js for diagram rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
 </head>
 <body>
     <div class="header">
@@ -309,7 +335,7 @@
                 });
                 const data = await response.json();
                 if (response.ok) {
-                    addMessage('assistant', data.answer, data.source_documents);
+                    addMessage('assistant', data.answer, data.source_documents, data.mermaid_code, data.diagram_type);
                 } else {
                     addMessage('error', `Error: ${data.detail || 'Unknown error'}`);
                 }
@@ -323,7 +349,7 @@
         }
 
         // Function to add a message to the chat
-        function addMessage(type, content, sources = null) {
+        function addMessage(type, content, sources = null, mermaidCode = null, diagramType = null) {
             const messagesDiv = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
@@ -331,6 +357,17 @@
 
             // Render Markdown content
             messageContent += marked.parse(content);
+
+            // Add Mermaid diagram if available
+            if (mermaidCode && diagramType) {
+                const diagramId = `diagram-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                messageContent += `
+                    <div class="diagram-container">
+                        <div class="diagram-title">Generated ${diagramType.charAt(0).toUpperCase() + diagramType.slice(1)} Diagram</div>
+                        <div class="mermaid" id="${diagramId}">${mermaidCode.replace(/\\n/g, '\n')}</div>
+                    </div>
+                `;
+            }
 
             // Add source documents if available
             if (sources && sources.length > 0) {
@@ -347,6 +384,21 @@
 
             messageDiv.innerHTML = messageContent;
             messagesDiv.appendChild(messageDiv);
+            
+            // Render Mermaid diagrams if present
+            if (mermaidCode && diagramType) {
+                try {
+                    mermaid.run();
+                } catch (error) {
+                    console.error('Failed to render Mermaid diagram:', error);
+                    // Add error message to diagram container
+                    const diagramContainer = messageDiv.querySelector('.diagram-container');
+                    if (diagramContainer) {
+                        diagramContainer.innerHTML += `<div class="diagram-error">Failed to render diagram: ${error.message}</div>`;
+                    }
+                }
+            }
+            
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
 
@@ -381,6 +433,14 @@
 
         // Load repositories on page load
         loadRepositories();
+
+        // Initialize Mermaid
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: 'default',
+            securityLevel: 'strict',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif'
+        });
 
         // Refresh repositories every 30 seconds to update status
         setInterval(loadRepositories, 30000);
