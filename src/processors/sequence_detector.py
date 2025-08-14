@@ -21,6 +21,8 @@ class SequenceDetector:
             return self._analyze_js_ts_code(code)
         elif language == 'csharp':
             return self._analyze_csharp_code(code)
+        elif language == 'markdown':
+            return self._analyze_markdown_documentation(code)
         else:
             return {}
     
@@ -140,3 +142,142 @@ class SequenceDetector:
                 if match:
                     return match.group(1) or match.group(2)
         return 'Client'
+    
+    def _analyze_markdown_documentation(self, content: str) -> Dict:
+        """Analyze markdown documentation for API and service interactions"""
+        interactions = []
+        
+        # Look for API endpoint patterns
+        api_patterns = [
+            # REST API calls: curl -X POST http://localhost:5033/Car
+            r'curl\s+-X\s+(\w+)\s+([^\s]+)',
+            # HTTP requests: POST /api/cars
+            r'(GET|POST|PUT|DELETE|PATCH)\s+([^\s\n]+)',
+            # Service URLs: http://localhost:5033
+            r'https?://[^\s]+:(\d+)([^\s]*)',
+        ]
+        
+        # Look for service interaction descriptions
+        service_patterns = [
+            # Service names: car-listing-service, car-order-service
+            r'(\w+)-service',
+            # API integrations: calls to, integrates with
+            r'(?:calls?|integrates?|connects?)\s+(?:to\s+)?(\w+[-\w]*service|\w+[-\w]*api)',
+        ]
+        
+        lines = content.split('\n')
+        current_service = self._extract_service_name_from_content(content)
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Check for API endpoint patterns
+            for pattern in api_patterns:
+                matches = re.finditer(pattern, line, re.IGNORECASE)
+                for match in matches:
+                    if len(match.groups()) >= 2:
+                        method = match.group(1)
+                        endpoint = match.group(2)
+                        
+                        # Extract service name from URL or endpoint
+                        target_service = self._extract_service_from_endpoint(endpoint, line)
+                        
+                        interactions.append({
+                            'caller': current_service or 'Client',
+                            'callee': target_service,
+                            'method': f'{method.upper()}({endpoint})',
+                            'type': 'api_call'
+                        })
+            
+            # Check for service interaction descriptions
+            for pattern in service_patterns:
+                matches = re.finditer(pattern, line, re.IGNORECASE)
+                for match in matches:
+                    service_name = match.group(1)
+                    if service_name and service_name != current_service:
+                        interactions.append({
+                            'caller': current_service or 'Client',
+                            'callee': self._normalize_service_name(service_name),
+                            'method': 'integrate',
+                            'type': 'service_integration'
+                        })
+        
+        return {
+            'language': 'markdown',
+            'interactions': interactions
+        }
+    
+    def _extract_service_name_from_content(self, content: str) -> str:
+        """Extract the primary service name from documentation content"""
+        # Look for service headers: # Car Listing Service
+        header_match = re.search(r'^#\s+(.+?)\s*$', content, re.MULTILINE)
+        if header_match:
+            header_text = header_match.group(1).lower()
+            if 'service' in header_text:
+                # Convert "Car Listing Service" to "CarListingService"
+                words = header_text.replace('service', '').strip().split()
+                return ''.join(word.capitalize() for word in words) + 'Service'
+        
+        # Look for repository/project names
+        if 'car-listing' in content.lower():
+            return 'CarListingService'
+        elif 'car-order' in content.lower():
+            return 'CarOrderService'
+        elif 'car-notification' in content.lower():
+            return 'CarNotificationService'
+        elif 'car-web-client' in content.lower():
+            return 'CarWebClient'
+        
+        return 'UnknownService'
+    
+    def _extract_service_from_endpoint(self, endpoint: str, context: str) -> str:
+        """Extract target service name from endpoint URL or context"""
+        # Check for port numbers to identify services
+        port_service_map = {
+            '5033': 'CarListingService',
+            '5068': 'CarOrderService', 
+            '5001': 'CarNotificationService',
+            '3000': 'CarWebClient'
+        }
+        
+        # Extract port from URL
+        port_match = re.search(r':(\d+)', endpoint)
+        if port_match:
+            port = port_match.group(1)
+            if port in port_service_map:
+                return port_service_map[port]
+        
+        # Look for service names in the endpoint path
+        if '/car' in endpoint.lower():
+            return 'CarListingService'
+        elif '/order' in endpoint.lower():
+            return 'CarOrderService'
+        elif '/notification' in endpoint.lower():
+            return 'CarNotificationService'
+        
+        # Look for service names in context
+        if 'listing' in context.lower():
+            return 'CarListingService'
+        elif 'order' in context.lower():
+            return 'CarOrderService'
+        elif 'notification' in context.lower():
+            return 'CarNotificationService'
+        
+        return 'ExternalAPI'
+    
+    def _normalize_service_name(self, service_name: str) -> str:
+        """Normalize service names to consistent format"""
+        service_name = service_name.lower()
+        
+        if 'listing' in service_name:
+            return 'CarListingService'
+        elif 'order' in service_name:
+            return 'CarOrderService'
+        elif 'notification' in service_name:
+            return 'CarNotificationService'
+        elif 'web' in service_name or 'client' in service_name:
+            return 'CarWebClient'
+        
+        # Convert kebab-case to PascalCase
+        words = service_name.replace('-', ' ').replace('_', ' ').split()
+        return ''.join(word.capitalize() for word in words)

@@ -2,7 +2,7 @@
 DiagramHandler - Specialized agent for diagram generation using existing vector store capabilities
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from langchain.docstore.document import Document
 from ..processors.sequence_detector import SequenceDetector
 from ..utils.logging import get_logger
@@ -78,9 +78,16 @@ class DiagramHandler:
                             "status": "error"
                         }
                     else:
-                        # Found code but no interaction patterns
+                        # Found code but no interaction patterns - provide helpful guidance
+                        file_types_found = set()
+                        for doc in code_docs:
+                            file_path = doc.metadata.get('file_path', '')
+                            file_types_found.add(file_path.split('/')[-1] if '/' in file_path else file_path)
+                        
+                        guidance_message = f"Found {len(code_docs)} code documents in the requested repositories ({', '.join(repositories)}), but they appear to contain setup/configuration files ({', '.join(file_types_found)}) rather than business logic with method interactions.\n\nFor sequence diagrams, I need files with:\n• Class definitions with method calls\n• Service-to-service interactions\n• API endpoint handlers\n• Business logic workflows\n\nTry asking about repositories that contain more substantial application code, or ask me to 'list available repositories' to see what's indexed."
+                        
                         return {
-                            "analysis_summary": f"Found {len(code_docs)} code documents in the requested repositories, but no clear interaction patterns for sequence diagram generation. The code may not contain the type of method calls and class interactions needed for sequence diagrams.",
+                            "analysis_summary": guidance_message,
                             "mermaid_code": None,
                             "diagram_type": "sequence",
                             "source_documents": self._format_source_docs(code_docs),
@@ -182,7 +189,7 @@ class DiagramHandler:
             print(f"REPO DEBUG PRINT: Total results before language filtering: {len(results)}")
             
             # Filter for supported languages using existing metadata
-            supported_languages = {'python', 'javascript', 'typescript', 'csharp'}
+            supported_languages = {'python', 'javascript', 'typescript', 'csharp', 'markdown'}
             filtered_results = []
             
             for doc in results:
@@ -288,7 +295,8 @@ class DiagramHandler:
             '.py': 'python',
             '.js': 'javascript', 
             '.ts': 'typescript',
-            '.cs': 'csharp'
+            '.cs': 'csharp',
+            '.md': 'markdown'
         }
         for ext, lang in ext_map.items():
             if file_path.endswith(ext):
@@ -470,3 +478,71 @@ class DiagramHandler:
         except Exception as e:
             logger.error(f"Failed to get repositories with code: {str(e)}")
             return []
+    
+    def get_repository_analysis(self, repository_name: Optional[str] = None) -> Dict[str, Any]:
+        """Analyze what types of code files are available in a repository"""
+        try:
+            if repository_name:
+                docs = self.vectorstore.similarity_search("", k=100, filter={'repository': repository_name})
+            else:
+                docs = self.vectorstore.similarity_search("", k=100)
+            
+            analysis = {
+                'total_files': len(docs),
+                'languages': {},
+                'file_types': {},
+                'has_business_logic': False,
+                'suitable_for_diagrams': False,
+                'recommendations': []
+            }
+            
+            business_logic_indicators = [
+                'class ', 'function ', 'def ', 'async def', 'interface ',
+                'service', 'controller', 'handler', 'process', 'workflow'
+            ]
+            
+            for doc in docs:
+                # Language analysis
+                lang = doc.metadata.get('language', 'unknown')
+                if lang == 'unknown':
+                    lang = self._detect_language_from_path(doc.metadata.get('file_path', ''))
+                
+                analysis['languages'][lang] = analysis['languages'].get(lang, 0) + 1
+                
+                # File type analysis
+                file_path = doc.metadata.get('file_path', '')
+                file_name = file_path.split('/')[-1] if '/' in file_path else file_path
+                file_ext = '.' + file_name.split('.')[-1] if '.' in file_name else 'no_extension'
+                analysis['file_types'][file_ext] = analysis['file_types'].get(file_ext, 0) + 1
+                
+                # Business logic detection
+                content_lower = doc.page_content.lower()
+                if any(indicator in content_lower for indicator in business_logic_indicators):
+                    analysis['has_business_logic'] = True
+            
+            # Determine if suitable for diagrams
+            code_languages = {'python', 'javascript', 'typescript', 'csharp'}
+            has_code = any(lang in code_languages for lang in analysis['languages'].keys())
+            analysis['suitable_for_diagrams'] = has_code and analysis['has_business_logic']
+            
+            # Generate recommendations
+            if not analysis['suitable_for_diagrams']:
+                if not has_code:
+                    analysis['recommendations'].append("Repository contains mostly documentation files. Index repositories with actual source code.")
+                elif not analysis['has_business_logic']:
+                    analysis['recommendations'].append("Repository contains setup/configuration files but little business logic. Look for repositories with services, controllers, or application logic.")
+                else:
+                    analysis['recommendations'].append("Repository structure may not contain clear interaction patterns for sequence diagrams.")
+            else:
+                analysis['recommendations'].append("Repository appears suitable for sequence diagram generation.")
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"Failed to analyze repository content: {str(e)}")
+            return {
+                'error': str(e),
+                'total_files': 0,
+                'suitable_for_diagrams': False,
+                'recommendations': ["Unable to analyze repository content."]
+            }

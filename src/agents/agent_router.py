@@ -21,6 +21,11 @@ class AgentRouter:
     def route_query(self, question: str) -> Dict[str, Any]:
         """Route query to appropriate agent based on content analysis"""
         
+        # Check for repository information requests
+        if self._is_repository_info_request(question):
+            logger.info(f"Routing to repository information: {question[:100]}...")
+            return self._generate_repository_info_response(question)
+        
         # Detect diagram requests using enhanced pattern matching
         if self._is_diagram_request(question):
             logger.info(f"Routing to diagram generation: {question[:100]}...")
@@ -107,6 +112,91 @@ class AgentRouter:
         logger.debug(f"Request detected in: {question} with context: {has_context}, flow: {has_flow_phrase}, visualization: {has_visualization_intent}")
 
         return False
+    
+    def _is_repository_info_request(self, question: str) -> bool:
+        """Detect requests for repository information"""
+        question_lower = question.lower()
+        
+        info_patterns = [
+            'list repositories', 'available repositories', 'what repositories',
+            'which repositories', 'show repositories', 'indexed repositories',
+            'repository analysis', 'analyze repository', 'repository content',
+            'what repos', 'list repos', 'available repos'
+        ]
+        
+        return any(pattern in question_lower for pattern in info_patterns)
+    
+    def _generate_repository_info_response(self, query: str) -> Dict[str, Any]:
+        """Generate repository information response"""
+        try:
+            available_repos = self.diagram_handler._get_available_repositories()
+            
+            if not available_repos:
+                return {
+                    "answer": "No repositories are currently indexed in the knowledge base. Please index some repositories first using the /index endpoint.",
+                    "source_documents": [],
+                    "status": "success",
+                    "num_sources": 0,
+                    "error": None,
+                    "mermaid_code": None,
+                    "diagram_type": None
+                }
+            
+            # Analyze each repository for diagram suitability
+            repo_analysis = {}
+            for repo in available_repos:
+                analysis = self.diagram_handler.get_repository_analysis(repo)
+                repo_analysis[repo] = analysis
+            
+            # Format response
+            response_lines = [f"Found {len(available_repos)} indexed repositories:\n"]
+            
+            suitable_repos = []
+            unsuitable_repos = []
+            
+            for repo, analysis in repo_analysis.items():
+                repo_name = repo.split('/')[-1] if '/' in repo else repo
+                total_files = analysis.get('total_files', 0)
+                suitable = analysis.get('suitable_for_diagrams', False)
+                
+                if suitable:
+                    suitable_repos.append(f"✅ **{repo_name}** ({total_files} files) - Suitable for sequence diagrams")
+                else:
+                    unsuitable_repos.append(f"⚠️ **{repo_name}** ({total_files} files) - Limited diagram potential")
+            
+            if suitable_repos:
+                response_lines.append("## Repositories suitable for sequence diagrams:")
+                response_lines.extend(suitable_repos)
+                response_lines.append("")
+            
+            if unsuitable_repos:
+                response_lines.append("## Repositories with limited sequence diagram potential:")
+                response_lines.extend(unsuitable_repos)
+                response_lines.append("")
+            
+            response_lines.append("💡 **Tip**: For best sequence diagrams, ask about repositories that contain business logic, services, or API endpoints.")
+            
+            return {
+                "answer": "\n".join(response_lines),
+                "source_documents": [],
+                "status": "success",
+                "num_sources": len(available_repos),
+                "error": None,
+                "mermaid_code": None,
+                "diagram_type": None
+            }
+            
+        except Exception as e:
+            logger.error(f"Repository info generation failed: {str(e)}")
+            return {
+                "answer": "I encountered an error while retrieving repository information. Please try again.",
+                "source_documents": [],
+                "status": "error",
+                "num_sources": 0,
+                "error": str(e),
+                "mermaid_code": None,
+                "diagram_type": None
+            }
     
     def _generate_diagram_response(self, query: str) -> Dict[str, Any]:
         """Generate diagram and format as standard query response"""

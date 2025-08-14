@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     github_repos: List[str] = []
     github_branch: List[str] = ["main", "master"]  # Branches to index from GitHub repositories
     github_supported_file_extensions: List[str] = [
-        ".cs", ".py", ".js", ".jsx", ".ts", ".tsx", ".md", 
-        ".txt", ".html", ".css", ".json", ".xml", ".yml", ".yaml"
+        ".cs", ".py", ".sh", ".js", ".jsx", ".ts", ".tsx", ".md", 
+        ".txt", ".json", ".yml", ".yaml"
     ]
     
     # Processing Settings

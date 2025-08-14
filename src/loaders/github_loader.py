@@ -1,11 +1,10 @@
 import os
 import tempfile
 import shutil
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from pathlib import Path
 import git
 from langchain.docstore.document import Document
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
 
 from src.config import settings
 from ..utils.logging import get_logger
