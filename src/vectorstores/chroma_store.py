@@ -460,11 +460,15 @@ class ChromaStore(BaseVectorStore):
             logger.error(f"Failed to handle dimension mismatch: {str(e)}")
             raise
     
-    def similarity_search(self, query: str, k: int = 5) -> List[Document]:
-        """Perform similarity search in Chroma"""
+    def similarity_search(self, query: str, k: int = 5, filter: Optional[Dict[str, str]] = None) -> List[Document]:
+        """Perform similarity search in Chroma with optional metadata filtering"""
         try:
-            results = self.vector_store.similarity_search(query, k=k)
-            logger.debug(f"Found {len(results)} similar documents for query")
+            if filter:
+                results = self.vector_store.similarity_search(query, k=k, filter=filter)
+                logger.debug(f"Found {len(results)} similar documents for query with filter {filter}")
+            else:
+                results = self.vector_store.similarity_search(query, k=k)
+                logger.debug(f"Found {len(results)} similar documents for query")
             return results
         except Exception as e:
             logger.error(f"Failed to perform similarity search: {str(e)}")

@@ -1,5 +1,5 @@
 services:
-  knowledge-base-agent:
+  kb-agent:
     build: .
     ports:
       - "8000:8000"
@@ -66,7 +66,7 @@ services:
     volumes:
       - ./web/index.html:/usr/share/nginx/html/index.html
     depends_on:
-      - knowledge-base-agent
+      - kb-agent
 
 volumes:
   ollama_data:

@@ -103,7 +103,9 @@ class AgentRouter:
             return True
         if has_context and has_visualization_intent and 'flow' in question_lower:
             return True
-            
+
+        logger.debug(f"Request detected in: {question} with context: {has_context}, flow: {has_flow_phrase}, visualization: {has_visualization_intent}")
+
         return False
     
     def _generate_diagram_response(self, query: str) -> Dict[str, Any]:
