@@ -137,7 +137,7 @@ class AdvancedParser(ABC):
             
             # Parse with tree-sitter
             tree = self._parse_with_tree_sitter(source_code)
-            result.tree_sitter_tree = tree
+            result.tree_objects = tree
             
             # Check for parse errors
             if tree.root_node.has_error:

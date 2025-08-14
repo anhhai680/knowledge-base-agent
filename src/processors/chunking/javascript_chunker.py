@@ -12,6 +12,7 @@ from .parsers.javascript_parser import JavaScriptAdvancedParser
 from .parsers.semantic_element import SemanticElement, ElementType, ParseResult
 from .parsers.advanced_parser import FallbackError, AdvancedParserError
 from utils.logging import get_logger
+from src.config.settings import settings
 
 logger = get_logger(__name__)
 
@@ -32,19 +33,23 @@ class JavaScriptChunker(BaseChunker):
     Falls back to text-based chunking if tree-sitter parsing fails.
     """
     
-    def __init__(self, max_chunk_size: int = 1500, chunk_overlap: int = 100, use_advanced_parsing: bool = True):
+    def __init__(self, max_chunk_size: int = 1500, chunk_overlap: int = 100, use_advanced_parsing: Optional[bool] = None):
         """
         Initialize JavaScript chunker.
         
         Args:
             max_chunk_size: Maximum size for chunks in characters
             chunk_overlap: Number of characters to overlap between chunks
-            use_advanced_parsing: Whether to use tree-sitter advanced parsing
+            use_advanced_parsing: Whether to use tree-sitter advanced parsing. If None, uses environment variable USE_ADVANCED_PARSING.
         """
         super().__init__(max_chunk_size, chunk_overlap)
         
         # Configuration
-        self.use_advanced_parsing = use_advanced_parsing
+        # Use environment variable if not explicitly provided
+        if use_advanced_parsing is None:
+            self.use_advanced_parsing = settings.use_advanced_parsing
+        else:
+            self.use_advanced_parsing = use_advanced_parsing
         
         # Initialize advanced parser
         self.advanced_parser = None

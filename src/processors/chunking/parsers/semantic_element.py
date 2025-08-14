@@ -127,9 +127,9 @@ class SemanticElement:
     # Language-specific extensions
     language_specific: Dict[str, Any] = field(default_factory=dict)
     
-    # Tree-sitter specific metadata
+    # Parser-specific metadata
     tree_sitter_node_type: Optional[str] = None
-    tree_sitter_metadata: Dict[str, Any] = field(default_factory=dict)
+    additional_metadata: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
         """Validate and normalize the semantic element."""
@@ -198,7 +198,7 @@ class SemanticElement:
             "attributes": self.attributes,
             "language_specific": self.language_specific,
             "tree_sitter_node_type": self.tree_sitter_node_type,
-            "tree_sitter_metadata": self.tree_sitter_metadata,
+            "tree_sitter_metadata": self.additional_metadata,
             "has_children": len(self.children) > 0,
             "children_count": len(self.children),
         }
@@ -231,7 +231,7 @@ class SemanticElement:
             attributes=data.get("attributes", []),
             language_specific=data.get("language_specific", {}),
             tree_sitter_node_type=data.get("tree_sitter_node_type"),
-            tree_sitter_metadata=data.get("tree_sitter_metadata", {}),
+            additional_metadata=data.get("tree_sitter_metadata", {}),
         )
 
 
@@ -247,7 +247,7 @@ class ParseResult:
     # Parser metadata
     parser_type: str = ""
     parse_time_ms: float = 0.0
-    tree_sitter_tree: Optional[Any] = None  # The actual tree-sitter tree object
+    tree_objects: Optional[Any] = None  # The actual parsing tree object
     
     # Source information
     source_length: int = 0

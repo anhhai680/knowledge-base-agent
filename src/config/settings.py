@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     
     # Enhanced Chunking Settings
     use_enhanced_chunking: bool = True
+    use_advanced_parsing: bool = True
     chunking_config_path: Optional[str] = None
     
     # API Settings
