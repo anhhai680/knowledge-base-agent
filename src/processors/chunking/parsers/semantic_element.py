@@ -129,6 +129,11 @@ class SemanticElement:
     
     # Parser-specific metadata
     tree_sitter_node_type: Optional[str] = None
+    # Stores additional metadata extracted from tree-sitter nodes.
+    # Typical keys may include 'is_definition', 'is_reference', 'node_id', or other
+    # parser-specific attributes. The structure is a dictionary mapping string keys
+    # to values of any type, allowing flexible extension for language-specific or
+    # parser-specific information.
     additional_metadata: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
