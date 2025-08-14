@@ -660,5 +660,14 @@ class TypeScriptAdvancedParser(JavaScriptAdvancedParser):
             node_text = self._get_node_text(parent, "")
             if node_text.startswith("declare "):
                 return True
+        # Look for 'declare' keyword in ancestors, with a maximum depth limit
+        parent = node.parent
+        max_depth = 1000
+        depth = 0
+        while parent and depth < max_depth:
+            node_text = self._get_node_text(parent, "")
+            if node_text.startswith("declare "):
+                return True
             parent = parent.parent
+            depth += 1
         return False
