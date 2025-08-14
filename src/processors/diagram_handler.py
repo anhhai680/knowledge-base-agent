@@ -47,7 +47,7 @@ class DiagramHandler:
                     }
             
             # Step 2: Analyze patterns using existing metadata
-            sequence_patterns = self._analyze_interaction_patterns(code_docs)
+            sequence_patterns = self._analyze_interaction_patterns(code_docs, query)
             
             if not sequence_patterns:
                 # Check if we found documents but no code patterns
@@ -129,6 +129,9 @@ class DiagramHandler:
             # Extract repository names from query if specified
             repositories = self._extract_repositories_from_query(query)
             
+            # Create more targeted search terms based on the user's query
+            search_terms = self._extract_search_terms_from_query(query)
+            
             if repositories:
                 print(f"REPO DEBUG PRINT: User requested repositories: {repositories}")
                 logger.info(f"REPO DEBUG: User requested repositories: {repositories}")
@@ -164,26 +167,34 @@ class DiagramHandler:
                     try:
                         print(f"REPO DEBUG PRINT: Searching repository: {repo}")
                         logger.info(f"REPO DEBUG: Searching repository: {repo}")
-                        repo_results = self.vectorstore.similarity_search(
-                            query=query,
-                            k=20,  # Get more results per repository
-                            filter={"repository": repo}  # Filter by specific repository
-                        )
-                        print(f"REPO DEBUG PRINT: Found {len(repo_results)} results in {repo}")
-                        logger.info(f"REPO DEBUG: Found {len(repo_results)} results in {repo}")
-                        all_results.extend(repo_results)
-                        logger.debug(f"Found {len(repo_results)} documents in repository: {repo}")
+                        
+                        # Use enhanced search terms for better relevance
+                        for search_term in search_terms:
+                            repo_results = self.vectorstore.similarity_search(
+                                query=search_term,
+                                k=10,  # Get fewer results per search term to avoid noise
+                                filter={"repository": repo}  # Filter by specific repository
+                            )
+                            all_results.extend(repo_results)
+                            
+                        print(f"REPO DEBUG PRINT: Found {len(all_results)} results in {repo}")
+                        logger.info(f"REPO DEBUG: Found {len(all_results)} results in {repo}")
+                        logger.debug(f"Found {len(all_results)} documents in repository: {repo}")
                     except Exception as repo_error:
                         logger.warning(f"Failed to search repository {repo}: {str(repo_error)}")
                 
                 results = all_results
             else:
                 logger.info("REPO DEBUG: No specific repositories mentioned, searching all")
-                # No specific repositories mentioned, search all
-                results = self.vectorstore.similarity_search(
-                    query=query,
-                    k=20  # Get more results for comprehensive analysis
-                )
+                # No specific repositories mentioned, search with enhanced terms
+                all_results = []
+                for search_term in search_terms:
+                    term_results = self.vectorstore.similarity_search(
+                        query=search_term,
+                        k=15  # Get moderate results per term
+                    )
+                    all_results.extend(term_results)
+                results = all_results
             
             logger.info(f"REPO DEBUG: Total results before language filtering: {len(results)}")
             print(f"REPO DEBUG PRINT: Total results before language filtering: {len(results)}")
@@ -223,13 +234,14 @@ class DiagramHandler:
             logger.error(f"Failed to find relevant code: {str(e)}")
             return []
     
-    def _analyze_interaction_patterns(self, docs: List[Document]) -> List[Dict]:
+    def _analyze_interaction_patterns(self, docs: List[Document], query: str = "") -> List[Dict]:
         """Analyze code for interaction patterns"""
         patterns = []
         
         for doc in docs:
             language = self._detect_language_from_path(doc.metadata.get('file_path', ''))
-            pattern = self.sequence_detector.analyze_code(doc.page_content, language)
+            # Pass query context to the sequence detector for better relevance
+            pattern = self.sequence_detector.analyze_code(doc.page_content, language, query)
             if pattern and pattern.get('interactions'):
                 pattern['source_file'] = doc.metadata.get('file_path', 'unknown')
                 pattern['repository'] = doc.metadata.get('repository', 'unknown')
@@ -244,38 +256,60 @@ class DiagramHandler:
         participants = set()
         interactions = []
         
-        # Extract participants and interactions
+        # Extract participants and interactions with relevance prioritization
         for pattern in patterns:
             if pattern.get('interactions'):
                 for interaction in pattern['interactions']:
                     caller = interaction.get('caller', 'Unknown')
                     callee = interaction.get('callee', 'Unknown')
                     method = interaction.get('method', 'unknownMethod')
+                    relevance = interaction.get('relevance', 'medium')
                     
-                    # Filter out common noise patterns
+                    # Normalize service names to avoid duplicates (e.g., OrderService -> CarOrderService)
+                    caller = self._normalize_participant_name(caller)
+                    callee = self._normalize_participant_name(callee)
+                    
+                    # Skip interactions with None participants (filtered out participants)
+                    if caller is None or callee is None:
+                        continue
+                    
+                    # Filter out common noise patterns and prioritize high-relevance interactions
                     if self._is_valid_interaction(caller, callee, method):
                         participants.add(caller)
                         participants.add(callee)
-                        interactions.append((caller, callee, method))
+                        # Add relevance score to the interaction tuple for sorting
+                        relevance_score = 3 if relevance == 'high' else 1
+                        interactions.append((caller, callee, method, relevance_score))
         
         # Add participants
         for participant in sorted(participants):
             mermaid_lines.append(f"    participant {self._sanitize_name(participant)}")
         
-        # Add interactions (limit to prevent overcrowding)
-        unique_interactions = list(set(interactions))[:15]  # Limit interactions
-        for caller, callee, method in unique_interactions:
+        # Add interactions (sort by relevance and limit to prevent overcrowding)
+        # Sort by relevance score (highest first) and remove duplicates
+        interactions_with_score = list(set(interactions))
+        interactions_with_score.sort(key=lambda x: x[3], reverse=True)  # Sort by relevance score
+        
+        # Take top interactions and remove the relevance score
+        top_interactions = [(caller, callee, method) for caller, callee, method, score in interactions_with_score[:12]]
+        
+        for caller, callee, method in top_interactions:
             sanitized_caller = self._sanitize_name(caller)
             sanitized_callee = self._sanitize_name(callee)
-            mermaid_lines.append(f"    {sanitized_caller}->>+{sanitized_callee}: {method}")
+            sanitized_method = self._sanitize_method_name(method)
+            mermaid_lines.append(f"    {sanitized_caller}->>+{sanitized_callee}: {sanitized_method}")
             mermaid_lines.append(f"    {sanitized_callee}-->>-{sanitized_caller}: return")
         
-        return "\\n".join(mermaid_lines)
+        return "\n".join(mermaid_lines)
     
     def _is_valid_interaction(self, caller: str, callee: str, method: str) -> bool:
         """Filter out noise and invalid interactions"""
         # Skip self-calls
         if caller == callee:
+            return False
+        
+        # Skip interactions involving UnknownService
+        if caller == 'UnknownService' or callee == 'UnknownService':
             return False
         
         # Skip common noise patterns
@@ -285,6 +319,10 @@ class DiagramHandler:
         
         # Skip very short or generic names
         if len(caller) < 2 or len(callee) < 2 or len(method) < 2:
+            return False
+        
+        # Skip if method contains problematic characters for Mermaid
+        if any(char in method for char in ['`', '\\', '\n']):
             return False
         
         return True
@@ -306,6 +344,37 @@ class DiagramHandler:
     def _sanitize_name(self, name: str) -> str:
         """Sanitize names for Mermaid compatibility"""
         return name.replace(' ', '_').replace('-', '_').replace('.', '_')
+    
+    def _sanitize_method_name(self, method: str) -> str:
+        """Sanitize method names for Mermaid compatibility"""
+        # Remove problematic characters that break Mermaid syntax
+        sanitized = method.replace('`', '').replace('\\', '').replace('\n', ' ')
+        # Remove extra spaces and clean up
+        sanitized = ' '.join(sanitized.split())
+        # Limit length to prevent overly long method names
+        if len(sanitized) > 50:
+            sanitized = sanitized[:47] + '...'
+        return sanitized
+    
+    def _normalize_participant_name(self, participant: str) -> Optional[str]:
+        """Normalize participant names to avoid duplicates"""
+        # Handle common service name variations
+        if participant == 'OrderService':
+            return 'CarOrderService'
+        elif participant == 'ListingService':
+            return 'CarListingService'
+        elif participant == 'NotificationService':
+            return 'CarNotificationService'
+        elif participant == 'Client':
+            return 'CarWebClient'
+        elif participant == 'ExternalAPI':
+            # Don't include ExternalAPI - return None to filter out
+            return None
+        elif participant == 'UnknownService':
+            # Don't include UnknownService - return None to filter out
+            return None
+        
+        return participant
     
     def _format_source_docs(self, docs: List[Document]) -> List[Dict]:
         """Format source documents for response"""
@@ -546,3 +615,62 @@ class DiagramHandler:
                 'suitable_for_diagrams': False,
                 'recommendations': ["Unable to analyze repository content."]
             }
+    
+    def _extract_search_terms_from_query(self, query: str) -> List[str]:
+        """Extract relevant search terms from user query for targeted code search"""
+        import re
+        
+        search_terms = []
+        query_lower = query.lower()
+        
+        # Start with the original query
+        search_terms.append(query)
+        
+        # Extract specific workflows/processes mentioned
+        workflow_patterns = [
+            r'\b(login|authentication|auth|signin|signup)\b',
+            r'\b(order|purchase|buy|checkout|payment)\b', 
+            r'\b(car|vehicle|listing|inventory)\b',
+            r'\b(user|customer|client|account)\b',
+            r'\b(notification|alert|message|email)\b',
+            r'\b(api|service|endpoint|controller)\b',
+            r'\b(database|data|storage|persistence)\b',
+            r'\b(search|filter|query|find)\b'
+        ]
+        
+        for pattern in workflow_patterns:
+            matches = re.findall(pattern, query_lower)
+            for match in matches:
+                # Add both the match and related terms
+                search_terms.append(match)
+                # Add related search terms based on context
+                if match in ['login', 'authentication', 'auth', 'signin']:
+                    search_terms.extend(['authenticate', 'login', 'user', 'credential', 'token'])
+                elif match in ['order', 'purchase', 'buy', 'checkout']:
+                    search_terms.extend(['order', 'purchase', 'cart', 'payment', 'transaction'])
+                elif match in ['car', 'vehicle', 'listing']:
+                    search_terms.extend(['car', 'vehicle', 'listing', 'inventory', 'catalog'])
+                elif match in ['user', 'customer', 'client']:
+                    search_terms.extend(['user', 'customer', 'profile', 'account'])
+        
+        # Extract HTTP methods and endpoints mentioned
+        http_patterns = [
+            r'\b(GET|POST|PUT|DELETE|PATCH)\b',
+            r'/\w+',  # API endpoints
+            r'\b\w+Controller\b',
+            r'\b\w+Service\b',
+            r'\b\w+Repository\b'
+        ]
+        
+        for pattern in http_patterns:
+            matches = re.findall(pattern, query, re.IGNORECASE)
+            search_terms.extend(matches)
+        
+        # Remove duplicates and empty strings
+        unique_terms = []
+        for term in search_terms:
+            if term and term not in unique_terms and len(term) > 1:
+                unique_terms.append(term)
+        
+        # Limit to top terms to avoid too broad search
+        return unique_terms[:8]
