@@ -332,16 +332,77 @@ class SequenceDetector:
     
     def _create_meaningful_method(self, http_method: str, endpoint: str, target_service: str) -> str:
         """Create meaningful method descriptions for sequence diagrams"""
-        # Extract the API operation from the endpoint
-        operation = self._extract_operation_from_endpoint(endpoint, target_service)
         
-        # Create human-readable method description
+        # Create business-friendly operation names based on HTTP method and endpoint
+        method_upper = http_method.upper()
+        endpoint_lower = endpoint.lower()
+        
+        # Business operation mappings
+        if method_upper == 'POST':
+            if 'order' in endpoint_lower:
+                return 'Create Order'
+            elif 'user' in endpoint_lower or 'customer' in endpoint_lower:
+                return 'Create User'
+            elif 'auth' in endpoint_lower or 'login' in endpoint_lower:
+                return 'Authenticate User'
+            elif 'payment' in endpoint_lower:
+                return 'Process Payment'
+            elif 'car' in endpoint_lower or 'vehicle' in endpoint_lower:
+                return 'Add Vehicle'
+            elif 'notification' in endpoint_lower:
+                return 'Send Notification'
+            else:
+                operation = self._extract_operation_from_endpoint(endpoint, target_service)
+                return f'Create {operation}' if operation else 'Create Resource'
+                
+        elif method_upper == 'GET':
+            if 'swagger' in endpoint_lower or 'api' in endpoint_lower:
+                return 'Get API Documentation'
+            elif 'order' in endpoint_lower:
+                return 'Get Order Details'
+            elif 'user' in endpoint_lower or 'customer' in endpoint_lower:
+                return 'Get User Info'
+            elif 'car' in endpoint_lower or 'vehicle' in endpoint_lower:
+                return 'Get Vehicle Details'
+            elif 'notification' in endpoint_lower:
+                return 'Get Notifications'
+            else:
+                operation = self._extract_operation_from_endpoint(endpoint, target_service)
+                return f'Get {operation}' if operation else 'Get Resource'
+                
+        elif method_upper == 'PUT':
+            if 'order' in endpoint_lower:
+                return 'Update Order'
+            elif 'user' in endpoint_lower or 'customer' in endpoint_lower:
+                return 'Update User'
+            elif 'car' in endpoint_lower or 'vehicle' in endpoint_lower:
+                return 'Update Vehicle'
+            elif 'notification' in endpoint_lower:
+                return 'Update Notification'
+            else:
+                operation = self._extract_operation_from_endpoint(endpoint, target_service)
+                return f'Update {operation}' if operation else 'Update Resource'
+                
+        elif method_upper == 'DELETE':
+            if 'order' in endpoint_lower:
+                return 'Cancel Order'
+            elif 'user' in endpoint_lower or 'customer' in endpoint_lower:
+                return 'Delete User'
+            elif 'car' in endpoint_lower or 'vehicle' in endpoint_lower:
+                return 'Remove Vehicle'
+            elif 'notification' in endpoint_lower:
+                return 'Delete Notification'
+            else:
+                operation = self._extract_operation_from_endpoint(endpoint, target_service)
+                return f'Delete {operation}' if operation else 'Delete Resource'
+        
+        # Fallback for other methods
+        operation = self._extract_operation_from_endpoint(endpoint, target_service)
         if operation:
-            return f"{http_method} {operation}"
+            return f'{method_upper.title()} {operation}'
         else:
-            # Fallback to simplified endpoint
             simple_endpoint = self._simplify_endpoint(endpoint)
-            return f"{http_method} {simple_endpoint}"
+            return f'{method_upper.title()} {simple_endpoint}'
     
     def _extract_operation_from_endpoint(self, endpoint: str, service: str) -> Optional[str]:
         """Extract meaningful operation name from endpoint"""
@@ -430,15 +491,34 @@ class SequenceDetector:
             return True  # If no context, include all interactions
             
         context_lower = context.lower()
+        method_lower = method.lower()
+        endpoint_lower = endpoint.lower()
+        
+        # Specific flow filtering based on user intent
+        if 'creation' in context_lower or 'create' in context_lower or 'creating' in context_lower:
+            # For creation flows, only include POST and related GET operations
+            if method_lower in ['delete', 'remove']:
+                return False
+            if method_lower == 'post':
+                return True
+            if method_lower == 'get' and ('swagger' in endpoint_lower or 'api' in endpoint_lower):
+                return True  # API documentation is relevant for creation flows
+                
+        elif 'deletion' in context_lower or 'delete' in context_lower or 'deleting' in context_lower:
+            # For deletion flows, focus on DELETE operations
+            if method_lower != 'delete':
+                return False
+                
+        elif 'update' in context_lower or 'edit' in context_lower or 'modify' in context_lower:
+            # For update flows, focus on PUT/PATCH operations
+            if method_lower not in ['put', 'patch']:
+                return False
         
         # Check method relevance
         if self._is_relevant_to_context(method, context):
             return True
             
         # Check endpoint relevance
-        endpoint_lower = endpoint.lower()
-        
-        # Map common query terms to endpoint patterns
         query_patterns = {
             'login': ['/auth', '/login', '/signin', '/user'],
             'order': ['/order', '/purchase', '/cart', '/payment', '/checkout'],
