@@ -56,7 +56,24 @@ class AgentRouter:
             
             # Mermaid-specific requests
             re.compile(r'\\bmermaid\\s+(?:code|diagram|syntax)\\b', re.IGNORECASE),
-            re.compile(r'\\bgenerate\\s+mermaid\\b', re.IGNORECASE),
+            re.compile(r'\b(?:sequence|flow|interaction)\s+diagram\b', re.IGNORECASE),
+            re.compile(r'\bgenerate\s+(?:a\s+)?(?:sequence|flow|mermaid)\b', re.IGNORECASE),
+            re.compile(r'\bcreate\s+(?:a\s+)?(?:sequence|flow|diagram)\b', re.IGNORECASE),
+            re.compile(r'\bshow\s+(?:me\s+)?(?:a\s+)?(?:sequence|flow|diagram)\b', re.IGNORECASE),
+            
+            # Visualization requests  
+            re.compile(r'\bvisuali[sz]e\s+(?:how|the)\b', re.IGNORECASE),
+            re.compile(r'\bmap\s+out\s+the\b', re.IGNORECASE),
+            re.compile(r'\bdisplay\s+the\s+interaction\b', re.IGNORECASE),
+            
+            # Flow analysis requests
+            re.compile(r'\bhow\s+does\s+.*\s+flow\s+work', re.IGNORECASE),
+            re.compile(r'\bwhat.*\s+(?:call\s+)?sequence\b', re.IGNORECASE),
+            re.compile(r'\bwalk\s+me\s+through\s+the.*flow\b', re.IGNORECASE),
+            
+            # Mermaid-specific requests
+            re.compile(r'\bmermaid\s+(?:code|diagram|syntax)\b', re.IGNORECASE),
+            re.compile(r'\bgenerate\s+mermaid\b', re.IGNORECASE),
         ]
         return patterns
     
