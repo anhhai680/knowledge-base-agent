@@ -393,6 +393,10 @@ class SequenceDetector:
             elif 'notification' in endpoint_lower:
                 return 'Delete Notification'
             else:
+                operation = self._extract_operation_from_endpoint(endpoint, target_service)
+                return f'Delete {operation}' if operation else 'Delete Resource'
+        
+        # Fallback logic for other methods
         method_upper = http_method.upper()
         endpoint_lower = endpoint.lower()
         
