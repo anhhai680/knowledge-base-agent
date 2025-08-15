@@ -6,6 +6,16 @@
 ## Pending
 - [TASK017] Complete PR Review and System Integration - Finalize review and merge of sequence diagram feature (PR #11)
 - [TASK015] Tree-sitter Integration for Enhanced Parsing - Implement tree-sitter parsers for C#, JavaScript, and TypeScript to replace regex-based parsing
+- [TASK018] LangGraph Infrastructure Setup - Set up core LangGraph infrastructure, dependencies, and base classes for parallel system implementation
+- [TASK019] Chunking Workflow Implementation - Implement LangGraph chunking workflow with parallel processing and adaptive strategy selection
+- [TASK020] Embedding Workflow Implementation - Implement LangGraph embedding workflow with multi-model parallel processing and content optimization
+- [TASK021] Query Processing Workflow Implementation - Implement LangGraph query workflow with adaptive retrieval and cross-repository search
+- [TASK022] Master Orchestrator Implementation - Implement master workflow orchestrator for dependency management and parallel execution
+- [TASK023] LangGraph RAG Agent Implementation - Implement main LangGraph RAG agent with identical API interfaces for zero breaking changes
+- [TASK024] Performance Monitoring and Observability System - Implement comprehensive monitoring for LangGraph workflows and performance tracking
+- [TASK025] Migration Framework and Feature Flags - Implement migration framework with A/B testing and rollback mechanisms
+- [TASK026] LangGraph Testing and Validation Framework - Implement comprehensive testing framework for LangGraph components
+- [TASK027] API Integration and Compatibility Layer - Implement API compatibility layer ensuring seamless integration with existing endpoints
 - [TASK002] Enhance Answer Formatting - Improve response readability and code highlighting  
 - [TASK003] Implement Performance Monitoring - Add system observability and metrics tracking
 - [TASK004] Advanced Web Interface - Modern React/Vue.js frontend with conversation history
