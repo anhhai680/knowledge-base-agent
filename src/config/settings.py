@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # GitHub Settings
     github_token: Optional[str] = None
     github_repos: List[str] = []
+    github_branch: List[str] = ["main", "master"]
     github_supported_file_extensions: List[str] = [
         ".cs", ".py", ".js", ".jsx", ".ts", ".tsx", ".md", 
         ".txt", ".html", ".css", ".json", ".xml", ".yml", ".yaml"

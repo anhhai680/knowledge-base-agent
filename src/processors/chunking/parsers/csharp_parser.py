@@ -479,7 +479,6 @@ class CSharpAdvancedParser(AdvancedParser):
                 
                 return '\n'.join(cleaned_docs) if cleaned_docs else None
         
-        except (ValueError, IndexError):
         except (ValueError, IndexError) as e:
             logger.debug(
                 "Exception during XML documentation extraction for node %r: %s",
