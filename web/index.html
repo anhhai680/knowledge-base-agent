@@ -394,7 +394,10 @@
                     // Add error message to diagram container
                     const diagramContainer = messageDiv.querySelector('.diagram-container');
                     if (diagramContainer) {
-                        diagramContainer.innerHTML += `<div class="diagram-error">Failed to render diagram: ${error.message}</div>`;
+                    // Add user-friendly error message to diagram container
+                    const diagramContainer = messageDiv.querySelector('.diagram-container');
+                    if (diagramContainer) {
+                        diagramContainer.innerHTML += `<div class="diagram-error">Unable to render diagram.</div>`;
                     }
                 }
             }
