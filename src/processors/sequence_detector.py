@@ -393,7 +393,25 @@ class SequenceDetector:
             elif 'notification' in endpoint_lower:
                 return 'Delete Notification'
             else:
-                operation = self._extract_operation_from_endpoint(endpoint, target_service)
+        method_upper = http_method.upper()
+        endpoint_lower = endpoint.lower()
+        
+        # Use extracted business operation mappings
+        mappings = self.BUSINESS_OPERATION_MAPPINGS.get(method_upper, [])
+        for substr, operation_name in mappings:
+            if substr in endpoint_lower:
+                return operation_name
+        
+        # Fallback logic for each method type
+        if method_upper in ['POST', 'GET', 'PUT', 'DELETE']:
+            operation = self._extract_operation_from_endpoint(endpoint, target_service)
+            if method_upper == 'POST':
+                return f'Create {operation}' if operation else 'Create Resource'
+            elif method_upper == 'GET':
+                return f'Get {operation}' if operation else 'Get Resource'
+            elif method_upper == 'PUT':
+                return f'Update {operation}' if operation else 'Update Resource'
+            elif method_upper == 'DELETE':
                 return f'Delete {operation}' if operation else 'Delete Resource'
         
         # Fallback for other methods
