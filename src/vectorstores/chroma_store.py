@@ -41,11 +41,15 @@ class ChromaStore(BaseVectorStore):
     def _initialize_chroma_simple(self):
         """Initialize Chroma with a simple, robust approach"""
         try:
-            # Always use persistent client for reliability
+            # Use persistent client for reliability
             logger.info("Initializing Chroma with persistent client")
             
-            # Ensure the persist directory is clean
-            self._ensure_clean_persist_directory()
+            # Only clean directory if it's corrupted or empty
+            if not self._is_persist_directory_valid():
+                logger.info("Persist directory needs cleanup, performing maintenance")
+                self._ensure_clean_persist_directory()
+            else:
+                logger.info("Persist directory is valid, skipping cleanup")
             
             # Create the vector store
             self.vector_store = Chroma(
@@ -61,26 +65,83 @@ class ChromaStore(BaseVectorStore):
             # Try to create in a completely different location
             self._initialize_in_alternative_location()
     
+    def _is_persist_directory_valid(self):
+        """Check if the persist directory is valid and contains data"""
+        try:
+            if not os.path.exists(self.persist_directory):
+                logger.info("Persist directory does not exist, needs creation")
+                return False
+            
+            # Check if directory contains ChromaDB files
+            chroma_files = []
+            for root, dirs, files in os.walk(self.persist_directory):
+                for file in files:
+                    if file.endswith(('.sqlite', '.db', '.parquet')) or 'chroma' in file.lower():
+                        chroma_files.append(os.path.join(root, file))
+            
+            if chroma_files:
+                logger.info(f"Found {len(chroma_files)} ChromaDB files in persist directory")
+                return True
+            else:
+                logger.info("Persist directory exists but contains no ChromaDB files")
+                return False
+                
+        except Exception as e:
+            logger.warning(f"Error checking persist directory validity: {e}")
+            return False
+    
+    def _is_directory_corrupted(self):
+        """Check if the persist directory is corrupted and needs cleanup"""
+        try:
+            if not os.path.exists(self.persist_directory):
+                return False  # Not corrupted, just doesn't exist
+            
+            # Check for common corruption indicators
+            corruption_indicators = [
+                # Check for broken symlinks
+                any(os.path.islink(os.path.join(self.persist_directory, item)) and 
+                    not os.path.exists(os.path.join(self.persist_directory, item)) 
+                    for item in os.listdir(self.persist_directory)),
+                # Check for permission issues
+                not os.access(self.persist_directory, os.R_OK | os.W_OK)
+            ]
+            
+            if any(corruption_indicators):
+                logger.warning("Directory corruption detected")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Error checking directory corruption: {e}")
+            return True  # Assume corrupted if we can't check
+    
     def _ensure_clean_persist_directory(self):
         """Ensure the persist directory is clean and ready for use"""
         try:
             if os.path.exists(self.persist_directory):
                 logger.info(f"Cleaning up existing directory: {self.persist_directory}")
                 
-                # Try to remove the directory
-                try:
-                    shutil.rmtree(self.persist_directory)
-                    logger.info("Successfully removed existing directory")
-                except OSError as e:
-                    if "Device or resource busy" in str(e):
-                        logger.warning("Resource busy, trying alternative cleanup")
-                        self._force_cleanup_directory()
-                    else:
-                        raise e
+                # Check if directory is actually corrupted before cleaning
+                if self._is_directory_corrupted():
+                    logger.warning("Directory appears corrupted, performing cleanup")
+                    # Try to remove the directory
+                    try:
+                        shutil.rmtree(self.persist_directory)
+                        logger.info("Successfully removed corrupted directory")
+                    except OSError as e:
+                        if "Device or resource busy" in str(e):
+                            logger.warning("Resource busy, trying alternative cleanup")
+                            self._force_cleanup_directory()
+                        else:
+                            raise e
+                else:
+                    logger.info("Directory appears healthy, skipping cleanup")
+                    return
             
-            # Create fresh directory
+            # Create directory if it doesn't exist
             os.makedirs(self.persist_directory, exist_ok=True)
-            logger.info(f"Created fresh directory: {self.persist_directory}")
+            logger.info(f"Ensured directory exists: {self.persist_directory}")
             
         except Exception as e:
             logger.error(f"Failed to ensure clean persist directory: {e}")
@@ -241,6 +302,13 @@ class ChromaStore(BaseVectorStore):
                         # Re-raise other errors
                         raise batch_e
             
+            # Persist the data to disk
+            try:
+                self.vector_store.persist()
+                logger.info("Successfully persisted ChromaDB data to disk")
+            except Exception as persist_e:
+                logger.warning(f"Failed to persist data: {persist_e}")
+            
             logger.info(f"Successfully added {len(all_ids)} documents to ChromaStore")
             return all_ids
             
@@ -277,6 +345,14 @@ class ChromaStore(BaseVectorStore):
             # Reinitialize
             self._initialize_chroma_simple()
             
+            # Ensure the new store is persisted
+            try:
+                if hasattr(self, 'vector_store') and self.vector_store:
+                    self.vector_store.persist()
+                    logger.info("Successfully persisted recreated Chroma store")
+            except Exception as persist_e:
+                logger.warning(f"Failed to persist recreated store: {persist_e}")
+            
         except Exception as e:
             logger.error(f"Failed to recreate Chroma store: {e}")
             # Try alternative location as last resort
@@ -305,6 +381,14 @@ class ChromaStore(BaseVectorStore):
         """Delete documents from Chroma"""
         try:
             self.vector_store.delete(ids)
+            
+            # Persist the changes to disk
+            try:
+                self.vector_store.persist()
+                logger.info("Successfully persisted deletion to disk")
+            except Exception as persist_e:
+                logger.warning(f"Failed to persist deletion: {persist_e}")
+            
             logger.info(f"Deleted {len(ids)} documents from ChromaStore")
             return True
         except Exception as e:
