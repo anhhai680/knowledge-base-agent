@@ -4,7 +4,7 @@ Sequence Detector for analyzing code patterns to generate sequence diagrams.
 
 import ast
 import re
-from typing import Dict, List, Any, Optional
+from typing import Dict, Optional
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -399,12 +399,6 @@ class SequenceDetector:
         # Fallback logic for other methods
         method_upper = http_method.upper()
         endpoint_lower = endpoint.lower()
-        
-        # Use extracted business operation mappings
-        mappings = self.BUSINESS_OPERATION_MAPPINGS.get(method_upper, [])
-        for substr, operation_name in mappings:
-            if substr in endpoint_lower:
-                return operation_name
         
         # Fallback logic for each method type
         if method_upper in ['POST', 'GET', 'PUT', 'DELETE']:
