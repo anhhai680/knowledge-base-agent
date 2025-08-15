@@ -2,17 +2,19 @@
 
 ## Architecture Overview
 
-The Knowledge Base Agent follows a **modular RAG (Retrieval-Augmented Generation) architecture** with clear separation of concerns and pluggable components. The system is designed for flexibility, scalability, and maintainability.
+The Knowledge Base Agent follows a **modular RAG (Retrieval-Augmented Generation) architecture with intelligent agent routing** for dual-mode responses (text and visual). The system features clear separation of concerns, pluggable components, and intelligent query routing between specialized agents. The architecture is designed for flexibility, scalability, and maintainability while supporting both traditional text responses and visual code analysis.
 
 ```mermaid
 flowchart TD
     subgraph "Frontend Layer"
-        UI[Web UI] 
-        API[REST API]
+        UI[Web UI with Mermaid.js] 
+        API[REST API with Extended Response]
     end
     
     subgraph "Agent Layer"
+        Router[Agent Router]
         RAG[RAG Agent]
+        Diagram[Diagram Handler]
         QA[QA Chain]
     end
     
@@ -20,6 +22,7 @@ flowchart TD
         Loader[GitHub Loader]
         Processor[Text Processor]
         Chunker[Document Chunker]
+        Detector[Sequence Detector]
     end
     
     subgraph "LLM Layer"
@@ -48,10 +51,15 @@ flowchart TD
     end
     
     UI --> API
-    API --> RAG
+    API --> Router
+    Router --> RAG
+    Router --> Diagram
     RAG --> QA
     RAG --> Vector
+    Diagram --> Detector
+    Diagram --> Vector
     QA --> LLMFactory
+    Detector --> LLMFactory
     LLMFactory --> OpenAI
     LLMFactory --> Gemini
     LLMFactory --> Ollama
@@ -73,7 +81,27 @@ flowchart TD
 
 ## Core Design Patterns
 
-### 1. Factory Pattern for LLM Abstraction
+### 1. Agent Router Pattern for Dual-Mode Responses
+
+The system uses an intelligent agent router to automatically detect user intent and route queries to appropriate specialized agents, enabling both text and visual responses from a single endpoint.
+
+**Agent Router Pattern:**
+```python
+# Router intelligently classifies queries and routes to appropriate agents
+def route_query(self, question: str) -> Dict[str, Any]:
+    if self._is_diagram_request(question):
+        return self.diagram_handler.generate_sequence_diagram(question)
+    else:
+        return self.rag_agent.query(question)
+```
+
+**Key Benefits:**
+- **Seamless User Experience**: Single endpoint for all query types
+- **Intelligent Classification**: 12+ regex patterns detect diagram requests vs text queries
+- **Backward Compatibility**: Existing queries work exactly as before
+- **Extensible**: Easy to add new specialized agents for different response types
+
+### 2. Factory Pattern for LLM Abstraction
 
 The system uses factory patterns to abstract LLM and embedding model selection, allowing runtime switching between providers without code changes.
 
@@ -93,7 +121,7 @@ llm = LLMFactory.create_llm(
 - **Fallback Support**: Graceful degradation when primary models fail
 - **Cost Optimization**: Automatically select cost-effective models for simple queries
 
-### 2. Repository-Based Data Loading
+### 3. Repository-Based Data Loading
 
 GitHub repositories are processed using a specialized loader that understands code structure and preserves important metadata.
 
@@ -121,7 +149,7 @@ processed_docs = TextProcessor.process_documents(
 - `chunk_index`: Position within file for reconstruction
 - `commit_sha`: Git commit reference for version tracking
 
-### 3. Vector Store Abstraction
+### 4. Vector Store Abstraction
 
 The vector store layer provides a consistent interface while supporting different backends and handling dimension compatibility automatically.
 
@@ -142,7 +170,7 @@ results = vector_store.similarity_search(
 )
 ```
 
-### 4. Chain-of-Thought RAG Processing
+### 5. Chain-of-Thought RAG Processing
 
 The RAG agent uses a structured approach to query processing that mirrors human problem-solving patterns.
 

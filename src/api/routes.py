@@ -41,6 +41,7 @@ app.add_middleware(
 
 # Global components
 rag_agent = None
+agent_router = None
 github_loader = None
 text_processor = None
 indexed_repositories: Dict[str, RepositoryInfo] = {}
@@ -127,7 +128,7 @@ async def restore_indexed_repositories():
 
 async def initialize_components():
     """Initialize components on startup with proper error handling"""
-    global rag_agent, github_loader, text_processor
+    global rag_agent, agent_router, github_loader, text_processor
     
     print("STARTUP DEBUG: Starting Knowledge Base Agent API...")
     logger.info("Starting Knowledge Base Agent API...")
@@ -221,6 +222,14 @@ async def initialize_components():
         logger.info("Initializing RAG agent...")
         rag_agent = RAGAgent(llm, vector_store)
         
+        # Initialize diagram handler and agent router
+        logger.info("Initializing diagram handler and agent router...")
+        from ..processors.diagram_handler import DiagramHandler
+        from ..agents.agent_router import AgentRouter
+        
+        diagram_handler = DiagramHandler(vector_store, llm)
+        agent_router = AgentRouter(rag_agent, diagram_handler)
+        
         # Initialize other components
         logger.info("Initializing other components...")
         github_loader = GitHubLoader(settings.github_token or "")
@@ -248,19 +257,23 @@ async def startup_event():
 
 @app.post("/query", response_model=QueryResponse)
 async def query_knowledge_base(request: QueryRequest):
-    """Query the knowledge base"""
+    """Enhanced query endpoint with intelligent agent routing"""
     try:
-        if not rag_agent:
-            raise HTTPException(status_code=500, detail="RAG agent not initialized")
+        if not agent_router:
+            raise HTTPException(status_code=500, detail="Agent router not initialized")
         
-        result = rag_agent.query(request.question)
+        # Use agent router to handle all query types
+        result = agent_router.route_query(request.question)
         
         return QueryResponse(
             answer=result["answer"],
             source_documents=result["source_documents"],
             status=result["status"],
             num_sources=result["num_sources"],
-            error=result.get("error")
+            error=result.get("error"),
+            # Include extended fields if present (for diagram responses)
+            mermaid_code=result.get("mermaid_code"),
+            diagram_type=result.get("diagram_type")
         )
     except Exception as e:
         logger.error(f"Error querying knowledge base: {str(e)}")
