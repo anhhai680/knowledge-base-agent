@@ -5,15 +5,17 @@ from typing import List, Dict, Any, Optional
 import chromadb
 import os
 import shutil
+import time
+import subprocess
 from .base_store import BaseVectorStore
-from ..llm.embedding_factory import get_embedding_function
+from ..llm.embedding_factory import get_embedding_function, MultiModelEmbeddingWrapper
 from ..config.model_config import ModelConfiguration
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 class ChromaStore(BaseVectorStore):
-    """Chroma vector store implementation with dimension compatibility checking"""
+    """Simplified Chroma vector store implementation with robust error handling"""
     
     def __init__(self, 
                  collection_name: str = "knowledge-base-collection",
@@ -26,208 +28,201 @@ class ChromaStore(BaseVectorStore):
         self.port = port
         self.persist_directory = persist_directory
         
-        # Set up embedding function
-        self.embedding_function = embedding_function or get_embedding_function()
+        # Set up default embedding function (for backward compatibility)
+        self.default_embedding_function = embedding_function or get_embedding_function()
         
-        # Initialize Chroma with dimension compatibility checking
-        self._initialize_chroma_with_compatibility_check()
+        # Use single embedding function for consistency
+        self.embedding_function = self.default_embedding_function
+        logger.info("Using single embedding model for consistency")
         
-    def _initialize_chroma_with_compatibility_check(self):
-        """Initialize Chroma with dimension compatibility checking"""
-        try:
-            # For Docker environment, always use persistent client to ensure data persistence
-            # The HTTP client creates separate in-memory collections that don't persist
-            if os.getenv("DOCKER_CONTAINER"):
-                logger.info("Docker environment detected, using persistent client for data consistency")
-                self._initialize_persistent_client()
-                return
-            
-            # First, try to connect to existing collection
-            self.client = chromadb.HttpClient(host=self.host, port=self.port)
-            
-            # Check if collection exists and if dimensions are compatible
-            if self._collection_exists():
-                if not self._check_dimension_compatibility():
-                    logger.warning(f"Dimension mismatch detected for collection {self.collection_name}. Recreating collection.")
-                    self._recreate_collection()
-                else:
-                    logger.info(f"Using existing collection {self.collection_name} with compatible dimensions")
-            
-            # Initialize Chroma vector store
-            self.vector_store = Chroma(
-                client=self.client,
-                collection_name=self.collection_name,
-                embedding_function=self.embedding_function
-            )
-            logger.info(f"ChromaStore initialized successfully for collection: {self.collection_name}")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize ChromaStore with HTTP client: {str(e)}")
-            # Fallback to persistent client for local development
-            self._initialize_persistent_client()
+        # Initialize Chroma with simplified approach
+        self._initialize_chroma_simple()
     
-    def _initialize_persistent_client(self):
-        """Initialize persistent client as fallback"""
+    def _initialize_chroma_simple(self):
+        """Initialize Chroma with a simple, robust approach"""
         try:
-            # Check if persistent collection exists and if dimensions are compatible
-            if self._persistent_collection_exists():
-                if not self._check_dimension_compatibility_persistent():
-                    logger.warning(f"Dimension mismatch detected for persistent collection {self.collection_name}. Recreating collection.")
-                    self._recreate_persistent_collection()
-                else:
-                    logger.info(f"Using existing persistent collection {self.collection_name} with compatible dimensions")
+            # Use persistent client for reliability
+            logger.info("Initializing Chroma with persistent client")
             
+            # Only clean directory if it's corrupted or empty
+            if not self._is_persist_directory_valid():
+                logger.info("Persist directory needs cleanup, performing maintenance")
+                self._ensure_clean_persist_directory()
+            else:
+                logger.info("Persist directory is valid, skipping cleanup")
+            
+            # Create the vector store
             self.vector_store = Chroma(
                 collection_name=self.collection_name,
                 embedding_function=self.embedding_function,
                 persist_directory=self.persist_directory
             )
-            logger.info("Fallback to persistent ChromaStore initialized successfully")
+            
+            logger.info(f"ChromaStore initialized successfully in: {self.persist_directory}")
             
         except Exception as e:
-            logger.error(f"Failed to initialize persistent ChromaStore: {str(e)}")
-            raise
+            logger.error(f"Failed to initialize ChromaStore: {str(e)}")
+            # Try to create in a completely different location
+            self._initialize_in_alternative_location()
     
-    def _collection_exists(self) -> bool:
-        """Check if collection exists in HTTP client"""
+    def _is_persist_directory_valid(self):
+        """Check if the persist directory is valid and contains data"""
         try:
-            collections = self.client.list_collections()
-            return any(col.name == self.collection_name for col in collections)
+            if not os.path.exists(self.persist_directory):
+                logger.info("Persist directory does not exist, needs creation")
+                return False
+            
+            # Check if directory contains ChromaDB files
+            chroma_files = []
+            for root, dirs, files in os.walk(self.persist_directory):
+                for file in files:
+                    if file.endswith(('.sqlite', '.db', '.parquet')) or 'chroma' in file.lower():
+                        chroma_files.append(os.path.join(root, file))
+            
+            if chroma_files:
+                logger.info(f"Found {len(chroma_files)} ChromaDB files in persist directory")
+                return True
+            else:
+                logger.info("Persist directory exists but contains no ChromaDB files")
+                return False
+                
         except Exception as e:
-            logger.error(f"Failed to check collection existence: {str(e)}")
+            logger.warning(f"Error checking persist directory validity: {e}")
             return False
     
-    def _persistent_collection_exists(self) -> bool:
-        """Check if persistent collection exists"""
+    def _is_directory_corrupted(self):
+        """Check if the persist directory is corrupted and needs cleanup"""
         try:
-            persistent_client = chromadb.PersistentClient(path=self.persist_directory)
-            collections = persistent_client.list_collections()
-            return any(col.name == self.collection_name for col in collections)
-        except Exception as e:
-            logger.error(f"Failed to check persistent collection existence: {str(e)}")
-            return False
-    
-    def _check_dimension_compatibility(self) -> bool:
-        """Check if existing collection has compatible embedding dimensions"""
-        try:
-            collection = self.client.get_collection(self.collection_name)
+            if not os.path.exists(self.persist_directory):
+                return False  # Not corrupted, just doesn't exist
             
-            # Get collection metadata
-            metadata = collection.metadata or {}
-            stored_model = metadata.get("embedding_model")
-            stored_dimension = metadata.get("embedding_dimension")
+            # Check for common corruption indicators
+            corruption_indicators = [
+                # Check for broken symlinks
+                any(os.path.islink(os.path.join(self.persist_directory, item)) and 
+                    not os.path.exists(os.path.join(self.persist_directory, item)) 
+                    for item in os.listdir(self.persist_directory)),
+                # Check for permission issues
+                not os.access(self.persist_directory, os.R_OK | os.W_OK)
+            ]
             
-            # Get current embedding model and dimension
-            from ..config.settings import settings
-            current_model = settings.embedding_model
-            current_dimension = ModelConfiguration.get_embedding_dimension(current_model)
+            if any(corruption_indicators):
+                logger.warning("Directory corruption detected")
+                return True
             
-            # If we can't determine dimensions, detect them
-            if current_dimension is None:
-                current_dimension = ModelConfiguration.detect_embedding_dimension(self.embedding_function)
-            
-            # Compare dimensions
-            if stored_dimension and current_dimension:
-                is_compatible = stored_dimension == current_dimension
-                logger.info(f"Dimension compatibility check: stored={stored_dimension}, current={current_dimension}, compatible={is_compatible}")
-                return is_compatible
-            
-            # If metadata is missing, assume incompatible for safety
-            logger.warning(f"Missing dimension metadata for collection {self.collection_name}")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed to check dimension compatibility: {str(e)}")
-            return False
-    
-    def _check_dimension_compatibility_persistent(self) -> bool:
-        """Check dimension compatibility for persistent collection"""
-        try:
-            persistent_client = chromadb.PersistentClient(path=self.persist_directory)
-            collection = persistent_client.get_collection(self.collection_name)
-            
-            # Get collection metadata
-            metadata = collection.metadata or {}
-            stored_model = metadata.get("embedding_model")
-            stored_dimension = metadata.get("embedding_dimension")
-            
-            # Get current embedding model and dimension
-            from ..config.settings import settings
-            current_model = settings.embedding_model
-            current_dimension = ModelConfiguration.get_embedding_dimension(current_model)
-            
-            # If we can't determine dimensions, detect them
-            if current_dimension is None:
-                current_dimension = ModelConfiguration.detect_embedding_dimension(self.embedding_function)
-            
-            # Compare dimensions
-            if stored_dimension and current_dimension:
-                is_compatible = stored_dimension == current_dimension
-                logger.info(f"Persistent dimension compatibility check: stored={stored_dimension}, current={current_dimension}, compatible={is_compatible}")
-                return is_compatible
-            
-            # If metadata is missing, assume incompatible for safety
-            logger.warning(f"Missing dimension metadata for persistent collection {self.collection_name}")
             return False
             
         except Exception as e:
-            logger.error(f"Failed to check persistent dimension compatibility: {str(e)}")
-            return False
+            logger.warning(f"Error checking directory corruption: {e}")
+            return True  # Assume corrupted if we can't check
     
-    def _recreate_collection(self):
-        """Recreate collection with new embedding dimensions"""
+    def _ensure_clean_persist_directory(self):
+        """Ensure the persist directory is clean and ready for use"""
         try:
-            # Delete existing collection
-            self.client.delete_collection(self.collection_name)
-            logger.info(f"Deleted existing collection: {self.collection_name}")
-            
-            # Create new collection with metadata
-            from ..config.settings import settings
-            metadata = ModelConfiguration.get_collection_metadata(settings.embedding_model)
-            
-            collection = self.client.create_collection(
-                name=self.collection_name,
-                metadata=metadata
-            )
-            logger.info(f"Created new collection: {self.collection_name} with metadata: {metadata}")
-            
-        except Exception as e:
-            logger.error(f"Failed to recreate collection: {str(e)}")
-            raise
-    
-    def _recreate_persistent_collection(self):
-        """Recreate persistent collection with new embedding dimensions"""
-        try:
-            # Remove persistent directory
             if os.path.exists(self.persist_directory):
-                shutil.rmtree(self.persist_directory)
-                logger.info(f"Removed persistent directory: {self.persist_directory}")
+                logger.info(f"Cleaning up existing directory: {self.persist_directory}")
+                
+                # Check if directory is actually corrupted before cleaning
+                if self._is_directory_corrupted():
+                    logger.warning("Directory appears corrupted, performing cleanup")
+                    # Try to remove the directory
+                    try:
+                        shutil.rmtree(self.persist_directory)
+                        logger.info("Successfully removed corrupted directory")
+                    except OSError as e:
+                        if "Device or resource busy" in str(e):
+                            logger.warning("Resource busy, trying alternative cleanup")
+                            self._force_cleanup_directory()
+                        else:
+                            raise e
+                else:
+                    logger.info("Directory appears healthy, skipping cleanup")
+                    return
             
-            # Create new persistent client and collection
-            persistent_client = chromadb.PersistentClient(path=self.persist_directory)
-            from ..config.settings import settings
-            metadata = ModelConfiguration.get_collection_metadata(settings.embedding_model)
-            
-            collection = persistent_client.create_collection(
-                name=self.collection_name,
-                metadata=metadata
-            )
-            logger.info(f"Created new persistent collection: {self.collection_name} with metadata: {metadata}")
+            # Create directory if it doesn't exist
+            os.makedirs(self.persist_directory, exist_ok=True)
+            logger.info(f"Ensured directory exists: {self.persist_directory}")
             
         except Exception as e:
-            logger.error(f"Failed to recreate persistent collection: {str(e)}")
+            logger.error(f"Failed to ensure clean persist directory: {e}")
             raise
+    
+    def _force_cleanup_directory(self):
+        """Force cleanup a directory that's busy"""
+        try:
+            logger.info("Performing force cleanup of busy directory")
+            
+            # Wait a bit
+            time.sleep(2)
+            
+            # Try system commands
+            if os.name != 'nt':  # Unix-like
+                try:
+                    subprocess.run(['rm', '-rf', self.persist_directory], check=False)
+                    if not os.path.exists(self.persist_directory):
+                        logger.info("System command cleanup successful")
+                        return
+                except:
+                    pass
+            
+            # Try individual file removal
+            if os.path.exists(self.persist_directory):
+                for root, dirs, files in os.walk(self.persist_directory, topdown=False):
+                    for file in files:
+                        try:
+                            os.remove(os.path.join(root, file))
+                        except:
+                            pass
+                    for dir in dirs:
+                        try:
+                            os.rmdir(os.path.join(root, dir))
+                        except:
+                            pass
+                
+                try:
+                    os.rmdir(self.persist_directory)
+                    logger.info("Individual file cleanup successful")
+                except:
+                    logger.warning("Individual cleanup failed, will use alternative location")
+                    raise Exception("Directory cleanup failed")
+                    
+        except Exception as e:
+            logger.error(f"Force cleanup failed: {e}")
+            raise
+    
+    def _initialize_in_alternative_location(self):
+        """Initialize Chroma in an alternative location"""
+        try:
+            logger.info("Initializing in alternative location")
+            
+            # Create timestamped alternative directory
+            timestamp = int(time.time())
+            alternative_dir = f"./chroma_db_alt_{timestamp}"
+            
+            # Ensure it's clean
+            if os.path.exists(alternative_dir):
+                shutil.rmtree(alternative_dir)
+            
+            os.makedirs(alternative_dir, exist_ok=True)
+            
+            # Update persist directory
+            self.persist_directory = alternative_dir
+            
+            # Create vector store
+            self.vector_store = Chroma(
+                collection_name=self.collection_name,
+                embedding_function=self.embedding_function,
+                persist_directory=self.persist_directory
+            )
+            
+            logger.info(f"ChromaStore initialized in alternative location: {self.persist_directory}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize in alternative location: {e}")
+            raise Exception(f"All Chroma initialization methods failed: {e}")
     
     def _filter_document_metadata(self, documents: List[Document]) -> List[Document]:
-        """
-        Filter complex metadata from documents to ensure ChromaDB compatibility.
-        
-        Args:
-            documents: List of documents to filter
-            
-        Returns:
-            List of documents with filtered metadata
-        """
+        """Filter complex metadata from documents to ensure ChromaDB compatibility"""
         filtered_documents = []
         
         for doc in documents:
@@ -267,17 +262,14 @@ class ChromaStore(BaseVectorStore):
         return filtered_documents
 
     def add_documents(self, documents: List[Document]) -> List[str]:
-        """Add documents to Chroma vector store with batch processing to avoid token limits"""
+        """Add documents to Chroma vector store with simplified error handling"""
         try:
-            # Ensure collection metadata is up to date
-            self._update_collection_metadata()
-            
             # Filter complex metadata from documents before adding to Chroma
             filtered_documents = self._filter_document_metadata(documents)
             
-            # Implement batch processing to avoid token limits
+            # Add documents in batches to avoid token limits
             all_ids = []
-            batch_size = self._calculate_optimal_batch_size(filtered_documents)
+            batch_size = 50  # Conservative batch size
             
             logger.info(f"Processing {len(filtered_documents)} documents in batches of {batch_size}")
             
@@ -285,180 +277,86 @@ class ChromaStore(BaseVectorStore):
                 batch = filtered_documents[i:i + batch_size]
                 
                 try:
-                    # Estimate tokens for this batch
-                    batch_tokens = self._estimate_batch_tokens(batch)
-                    logger.debug(f"Batch {i//batch_size + 1}: {len(batch)} documents, ~{batch_tokens} tokens")
-                    
                     # Add batch to vector store
                     batch_ids = self.vector_store.add_documents(batch)
                     all_ids.extend(batch_ids)
+                    logger.debug(f"Successfully added batch {i//batch_size + 1}")
                     
                 except Exception as batch_e:
-                    # Check if it's a token limit error and reduce batch size
-                    if "max_tokens_per_request" in str(batch_e).lower() or "413" in str(batch_e):
-                        logger.warning(f"Token limit exceeded for batch, reducing batch size and retrying")
-                        # Recursively process with smaller batches
-                        smaller_batch_ids = self._process_with_reduced_batch_size(batch)
-                        all_ids.extend(smaller_batch_ids)
+                    logger.warning(f"Batch {i//batch_size + 1} failed: {batch_e}")
+                    
+                    # If it's a dimension mismatch, try to recreate the store
+                    if "dimension" in str(batch_e).lower() or "inconsistent dimensions" in str(batch_e).lower():
+                        logger.info("Dimension mismatch detected, recreating Chroma store")
+                        self._recreate_chroma_store()
+                        
+                        # Retry the failed batch
+                        try:
+                            batch_ids = self.vector_store.add_documents(batch)
+                            all_ids.extend(batch_ids)
+                            logger.info("Successfully added batch after recreation")
+                        except Exception as retry_e:
+                            logger.error(f"Failed to add batch after recreation: {retry_e}")
+                            raise retry_e
                     else:
                         # Re-raise other errors
                         raise batch_e
             
-            logger.info(f"Added {len(all_ids)} documents to ChromaStore in {(len(filtered_documents) + batch_size - 1) // batch_size} batches")
+            # Persist the data to disk
+            try:
+                self.vector_store.persist()
+                logger.info("Successfully persisted ChromaDB data to disk")
+            except Exception as persist_e:
+                logger.warning(f"Failed to persist data: {persist_e}")
+            
+            logger.info(f"Successfully added {len(all_ids)} documents to ChromaStore")
             return all_ids
             
         except Exception as e:
             error_msg = f"Failed to add documents to Chroma: {str(e)}"
             logger.error(error_msg)
-            
-            # Check if it's a dimension mismatch error
-            if "dimension" in str(e).lower():
-                logger.warning("Dimension mismatch detected. Attempting to recreate collection.")
-                try:
-                    self._handle_dimension_mismatch()
-                    # Retry adding documents with filtered metadata and batching
-                    retry_filtered_documents = self._filter_document_metadata(documents)
-                    ids = self.add_documents(retry_filtered_documents)  # Recursive call with batching
-                    logger.info(f"Successfully added {len(ids)} documents after collection recreation")
-                    return ids
-                except Exception as retry_e:
-                    error_msg = f"Failed to add documents after collection recreation: {str(retry_e)}"
-                    logger.error(error_msg)
-            
             raise Exception(error_msg)
     
-    def _calculate_optimal_batch_size(self, documents: List[Document]) -> int:
-        """
-        Calculate optimal batch size based on document content and token limits.
-        
-        Args:
-            documents: List of documents to analyze
+    def _recreate_chroma_store(self):
+        """Recreate the Chroma store to resolve dimension mismatches"""
+        try:
+            logger.info("Recreating Chroma store")
             
-        Returns:
-            Optimal batch size to stay under token limits
-        """
-        from ..config.settings import settings
-        
-        if not documents:
-            return settings.embedding_batch_size  # Use configured default
-        
-        # Sample a few documents to estimate average token count
-        sample_size = min(5, len(documents))
-        sample_documents = documents[:sample_size]
-        
-        total_tokens = 0
-        for doc in sample_documents:
-            # Rough estimate: 1 token ~= 4 characters for English text
-            estimated_tokens = len(doc.page_content) // 4
-            total_tokens += estimated_tokens
-        
-        avg_tokens_per_doc = total_tokens / sample_size if sample_size > 0 else 1000
-        
-        # Use configured token limit
-        safe_token_limit = settings.max_tokens_per_batch
-        
-        # Calculate batch size
-        optimal_batch_size = max(1, int(safe_token_limit / avg_tokens_per_doc))
-        
-        # Cap at configured batch size and reasonable maximum
-        optimal_batch_size = min(optimal_batch_size, settings.embedding_batch_size, 100)
-        
-        logger.debug(f"Calculated optimal batch size: {optimal_batch_size} (avg tokens per doc: {avg_tokens_per_doc:.0f})")
-        
-        return optimal_batch_size
-    
-    def _estimate_batch_tokens(self, batch: List[Document]) -> int:
-        """
-        Estimate total tokens for a batch of documents.
-        
-        Args:
-            batch: List of documents to estimate
+            # Close existing store if possible
+            if hasattr(self, 'vector_store') and self.vector_store:
+                try:
+                    if hasattr(self.vector_store, 'close'):
+                        self.vector_store.close()
+                except:
+                    pass
             
-        Returns:
-            Estimated token count for the batch
-        """
-        total_tokens = 0
-        for doc in batch:
-            # Rough estimate: 1 token ~= 4 characters for English text
-            # Add some overhead for metadata
-            content_tokens = len(doc.page_content) // 4
-            metadata_tokens = len(str(doc.metadata)) // 4
-            total_tokens += content_tokens + metadata_tokens + 10  # Small buffer per document
-        
-        return total_tokens
-    
-    def _process_with_reduced_batch_size(self, failed_batch: List[Document]) -> List[str]:
-        """
-        Process a failed batch with progressively smaller batch sizes.
-        
-        Args:
-            failed_batch: Batch that failed due to token limits
-            
-        Returns:
-            List of document IDs that were successfully added
-        """
-        all_ids = []
-        current_batch_size = max(1, len(failed_batch) // 2)  # Start with half the original size
-        
-        logger.info(f"Retrying failed batch of {len(failed_batch)} documents with reduced batch size: {current_batch_size}")
-        
-        for i in range(0, len(failed_batch), current_batch_size):
-            batch = failed_batch[i:i + current_batch_size]
-            
-            try:
-                batch_ids = self.vector_store.add_documents(batch)
-                all_ids.extend(batch_ids)
-                logger.debug(f"Successfully processed reduced batch: {len(batch)} documents")
-                
-            except Exception as e:
-                if "max_tokens_per_request" in str(e).lower() or "413" in str(e):
-                    # If still too large, process documents individually
-                    if len(batch) == 1:
-                        # Single document is too large - log warning and skip
-                        logger.warning(f"Skipping document that is too large: {batch[0].metadata.get('file_path', 'unknown')}")
-                        continue
+            # Remove the current directory
+            if os.path.exists(self.persist_directory):
+                try:
+                    shutil.rmtree(self.persist_directory)
+                except OSError as e:
+                    if "Device or resource busy" in str(e):
+                        logger.warning("Resource busy, using alternative location")
+                        self._initialize_in_alternative_location()
+                        return
                     else:
-                        # Recursively reduce batch size further
-                        recursive_ids = self._process_with_reduced_batch_size(batch)
-                        all_ids.extend(recursive_ids)
-                else:
-                    # Other error, re-raise
-                    raise e
-        
-        return all_ids
-    
-    def _update_collection_metadata(self):
-        """Update collection metadata with current embedding model info"""
-        try:
-            from ..config.settings import settings
-            metadata = ModelConfiguration.get_collection_metadata(settings.embedding_model)
+                        raise e
             
-            # Update metadata if we have access to the collection
-            if hasattr(self.vector_store, '_collection') and self.vector_store._collection:
-                current_metadata = self.vector_store._collection.metadata or {}
-                if current_metadata.get("embedding_model") != metadata["embedding_model"]:
-                    logger.info(f"Updating collection metadata for model change: {current_metadata.get('embedding_model')} -> {metadata['embedding_model']}")
-                    self.vector_store._collection.modify(metadata=metadata)
+            # Reinitialize
+            self._initialize_chroma_simple()
+            
+            # Ensure the new store is persisted
+            try:
+                if hasattr(self, 'vector_store') and self.vector_store:
+                    self.vector_store.persist()
+                    logger.info("Successfully persisted recreated Chroma store")
+            except Exception as persist_e:
+                logger.warning(f"Failed to persist recreated store: {persist_e}")
             
         except Exception as e:
-            logger.warning(f"Failed to update collection metadata: {str(e)}")
-    
-    def _handle_dimension_mismatch(self):
-        """Handle dimension mismatch by recreating the collection"""
-        try:
-            if hasattr(self, 'client') and self.client:
-                # HTTP client mode
-                self._recreate_collection()
-            else:
-                # Persistent client mode
-                self._recreate_persistent_collection()
-            
-            # Reinitialize the vector store
-            self._initialize_chroma_with_compatibility_check()
-            
-        except Exception as e:
-            logger.error(f"Failed to handle dimension mismatch: {str(e)}")
-            raise
+            logger.error(f"Failed to recreate Chroma store: {e}")
+            # Try alternative location as last resort
+            self._initialize_in_alternative_location()
     
     def similarity_search(self, query: str, k: int = 5, filter: Optional[Dict[str, str]] = None) -> List[Document]:
         """Perform similarity search in Chroma with optional metadata filtering"""
@@ -483,6 +381,14 @@ class ChromaStore(BaseVectorStore):
         """Delete documents from Chroma"""
         try:
             self.vector_store.delete(ids)
+            
+            # Persist the changes to disk
+            try:
+                self.vector_store.persist()
+                logger.info("Successfully persisted deletion to disk")
+            except Exception as persist_e:
+                logger.warning(f"Failed to persist deletion: {persist_e}")
+            
             logger.info(f"Deleted {len(ids)} documents from ChromaStore")
             return True
         except Exception as e:
@@ -516,77 +422,6 @@ class ChromaStore(BaseVectorStore):
         except Exception as e:
             logger.error(f"Failed to get collection info: {str(e)}")
             return {"error": f"Failed to get collection info: {str(e)}"}
-    
-    def validate_embedding_compatibility(self, embedding_model: str) -> bool:
-        """
-        Validate if the given embedding model is compatible with the existing collection
-        
-        Args:
-            embedding_model: Name of the embedding model to validate
-            
-        Returns:
-            True if compatible, False otherwise
-        """
-        try:
-            collection_info = self.get_collection_info()
-            current_model = collection_info.get("embedding_model")
-            
-            if current_model == "unknown" or current_model is None:
-                # No existing model info, assume compatible
-                return True
-                
-            return ModelConfiguration.check_dimension_compatibility(current_model, embedding_model)
-            
-        except Exception as e:
-            logger.error(f"Failed to validate embedding compatibility: {str(e)}")
-            return False
-    
-    def migrate_to_new_embedding_model(self, new_embedding_model: str, new_embedding_function) -> bool:
-        """
-        Migrate collection to use a new embedding model
-        
-        Args:
-            new_embedding_model: Name of the new embedding model
-            new_embedding_function: New embedding function instance
-            
-        Returns:
-            True if migration successful, False otherwise
-        """
-        try:
-            logger.info(f"Migrating collection to new embedding model: {new_embedding_model}")
-            
-            # Check if migration is needed
-            if self.validate_embedding_compatibility(new_embedding_model):
-                logger.info("New embedding model is compatible. No migration needed.")
-                return True
-            
-            # Store existing documents if any
-            existing_docs = []
-            try:
-                # Get all documents (this is a simplified approach)
-                # In a real scenario, you might want to implement pagination
-                existing_docs = self.vector_store.similarity_search("", k=10000)
-                logger.info(f"Found {len(existing_docs)} existing documents to migrate")
-            except Exception as e:
-                logger.warning(f"Could not retrieve existing documents: {str(e)}")
-            
-            # Update embedding function
-            self.embedding_function = new_embedding_function
-            
-            # Recreate collection
-            self._handle_dimension_mismatch()
-            
-            # Re-add documents if any were found
-            if existing_docs:
-                logger.info(f"Re-adding {len(existing_docs)} documents with new embedding model")
-                self.add_documents(existing_docs)
-            
-            logger.info(f"Successfully migrated collection to {new_embedding_model}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to migrate to new embedding model: {str(e)}")
-            return False
     
     def as_retriever(self, **kwargs):
         """Get retriever interface"""

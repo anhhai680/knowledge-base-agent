@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # GitHub Settings
     github_token: Optional[str] = None
     github_repos: List[str] = []
-    github_branch: List[str] = ["main", "master"]  # Branches to index from GitHub repositories
+    github_branch: List[str] = ["main", "master"]
     github_supported_file_extensions: List[str] = [
         ".cs", ".py", ".sh", ".js", ".jsx", ".ts", ".tsx", ".md", 
         ".txt", ".json", ".yml", ".yaml"
@@ -52,7 +52,12 @@ class Settings(BaseSettings):
     
     # Enhanced Chunking Settings
     use_enhanced_chunking: bool = True
+    use_advanced_parsing: bool = True
     chunking_config_path: Optional[str] = None
+    
+    # File-Type-Aware Embedding Settings
+    use_file_type_aware_embeddings: bool = False  # Disabled to prevent dimension mismatches
+    # Removed redundant model settings - using main embedding_model for all file types
     
     # API Settings
     api_host: str = "0.0.0.0"

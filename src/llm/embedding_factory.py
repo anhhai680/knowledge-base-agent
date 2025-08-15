@@ -2,7 +2,7 @@
 Embedding Factory - Manages different embedding providers with configuration support
 """
 
-from typing import Optional, Any
+from typing import Optional, Any, List
 from langchain_openai import OpenAIEmbeddings
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -19,20 +19,21 @@ class EmbeddingFactory:
     """Factory class for creating embedding instances with configuration support"""
     
     @staticmethod
-    def create_embedding(provider: Optional[str] = None, model: Optional[str] = None) -> Any:
+    def create_embedding(provider: Optional[str] = None, model: Optional[str] = None, file_type: Optional[str] = None) -> Any:
         """
-        Create an embedding instance based on the provider and model
+        Create an embedding instance based on the provider, model, and file type
         
         Args:
             provider: The embedding provider (if None, uses auto-detection)
-            model: The embedding model name (if None, uses settings.embedding_model)
+            model: The embedding model name (if None, uses file-type-aware selection)
+            file_type: The file type (e.g., '.md', '.py', '.js') for model selection
         
         Returns:
             An embedding instance
         """
-        # Use settings if no explicit model provided
+        # Use file-type-aware model selection if no explicit model provided
         if model is None:
-            model = settings.embedding_model
+            model = EmbeddingFactory._select_model_for_file_type(file_type)
         
         if provider is None:
             return EmbeddingFactory._create_with_auto_detection(model)
@@ -178,7 +179,166 @@ class EmbeddingFactory:
             encode_kwargs={'normalize_embeddings': True}
         )
 
+    @staticmethod
+    def _select_model_for_file_type(file_type: Optional[str] = None) -> str:
+        """Select the best embedding model based on file type"""
+        if not file_type:
+            return settings.embedding_model
+        
+        file_type_lower = file_type.lower()
+        
+        # For markdown files (especially those with diagrams), use larger models
+        if file_type_lower in ['.md', '.markdown']:
+            # Prioritize larger models for better semantic understanding of diagrams
+            if settings.openai_api_key:
+                return "text-embedding-3-large"  # 3072 dimensions, best for complex text
+            elif settings.gemini_api_key:
+                return "models/embedding-001"  # 768 dimensions, good for text
+            elif settings.embedding_api_base_url:
+                return "nomic-embed-text-v2"  # Improved version for text
+            else:
+                return "sentence-transformers/all-mpnet-base-v2"  # Local, good for text
+        
+        # For code files, use optimized models
+        elif file_type_lower in ['.py', '.js', '.ts', '.jsx', '.tsx', '.cs', '.java']:
+            if settings.openai_api_key:
+                return "text-embedding-3-small"  # 1536 dimensions, good for code
+            elif settings.embedding_api_base_url:
+                return "nomic-embed-text"  # Good for code
+            else:
+                return "sentence-transformers/all-MiniLM-L6-v2"  # Local, good for code
+        
+        # For configuration and other files
+        elif file_type_lower in ['.json', '.yml', '.yaml', '.xml', '.toml']:
+            if settings.openai_api_key:
+                return "text-embedding-3-small"  # 1536 dimensions
+            else:
+                return "sentence-transformers/all-MiniLM-L6-v2"  # Local
+        
+        # Default fallback
+        return settings.embedding_model
+
 # Convenience function for easy import
-def get_embedding_function(provider: Optional[str] = None, model: Optional[str] = None) -> Any:
-    """Get embedding function with specified provider and model"""
-    return EmbeddingFactory.create_embedding(provider, model)
+def get_embedding_function(provider: Optional[str] = None, model: Optional[str] = None, file_type: Optional[str] = None) -> Any:
+    """Get embedding function with specified provider, model, and file type"""
+    return EmbeddingFactory.create_embedding(provider, model, file_type)
+
+class MultiModelEmbeddingWrapper:
+    """Wrapper class that routes to different embedding models based on file type"""
+    
+    def __init__(self, default_embedding=None):
+        self.default_embedding = default_embedding
+        self._model_cache = {}  # Cache for created embedding models
+        
+        # Get configuration from settings
+        from ..config.settings import settings
+        
+        # Use main embedding model for all file types to ensure consistency
+        self._file_type_models = {
+            '.md': settings.embedding_model,  # Use main model for markdown
+            '.markdown': settings.embedding_model,
+            '.py': settings.embedding_model,  # Use main model for code
+            '.js': settings.embedding_model,
+            '.ts': settings.embedding_model,
+            '.jsx': settings.embedding_model,
+            '.tsx': settings.embedding_model,
+            '.cs': settings.embedding_model,
+            '.java': settings.embedding_model,
+            '.json': settings.embedding_model,
+            '.yml': settings.embedding_model,
+            '.yaml': settings.embedding_model
+        }
+    
+    def _get_embedding_for_file_type(self, file_type: str) -> Any:
+        """Get or create embedding model for a specific file type"""
+        if file_type not in self._model_cache:
+            try:
+                # Create embedding for this file type
+                model_name = self._file_type_models.get(file_type, 'text-embedding-3-small')
+                embedding = EmbeddingFactory.create_embedding(model=model_name)
+                self._model_cache[file_type] = embedding
+                logger.info(f"Created embedding model for {file_type}: {model_name}")
+            except Exception as e:
+                logger.warning(f"Failed to create embedding for {file_type}: {e}, using default")
+                self._model_cache[file_type] = self.default_embedding
+        
+        return self._model_cache[file_type]
+    
+    def _detect_file_type_from_text(self, text: str) -> str:
+        """Detect file type from text content (fallback when file path not available)"""
+        # Look for markdown indicators
+        if any(marker in text for marker in ['```mermaid', 'sequenceDiagram', 'participant', 'Note over']):
+            return '.md'
+        # Look for code indicators
+        elif any(marker in text for marker in ['def ', 'class ', 'function ', 'import ', 'using ']):
+            return '.py'  # Default to Python for code
+        else:
+            return '.txt'  # Default to text
+    
+    def embed_documents(self, texts: List[str], file_types: Optional[List[str]] = None) -> List[List[float]]:
+        """Embed documents using appropriate models for each file type"""
+        embeddings = []
+        
+        for i, text in enumerate(texts):
+            # Determine file type
+            file_type = None
+            if file_types and i < len(file_types):
+                file_type = file_types[i]
+            else:
+                # Fallback: detect from text content
+                file_type = self._detect_file_type_from_text(text)
+            
+            # Get appropriate embedding model
+            embedding_model = self._get_embedding_for_file_type(file_type)
+            
+            # Generate embedding
+            try:
+                if hasattr(embedding_model, 'embed_documents'):
+                    # Batch embedding
+                    doc_embedding = embedding_model.embed_documents([text])
+                    embeddings.append(doc_embedding[0])
+                elif hasattr(embedding_model, 'embed_query'):
+                    # Single document embedding
+                    doc_embedding = embedding_model.embed_query(text)
+                    embeddings.append(doc_embedding)
+                else:
+                    # Fallback to default
+                    logger.warning(f"Unknown embedding model type for {file_type}, using default")
+                    if hasattr(self.default_embedding, 'embed_documents'):
+                        doc_embedding = self.default_embedding.embed_documents([text])
+                        embeddings.append(doc_embedding[0])
+                    else:
+                        raise ValueError(f"Invalid embedding model for {file_type}")
+                        
+            except Exception as e:
+                logger.error(f"Failed to embed document with {file_type} model: {e}, using default")
+                # Fallback to default embedding
+                if hasattr(self.default_embedding, 'embed_documents'):
+                    doc_embedding = self.default_embedding.embed_documents([text])
+                    embeddings.append(doc_embedding[0])
+                else:
+                    raise
+        
+        return embeddings
+    
+    def embed_query(self, text: str, file_type: str = None) -> List[float]:
+        """Embed a single query using appropriate model"""
+        if not file_type:
+            file_type = self._detect_file_type_from_text(text)
+        
+        embedding_model = self._get_embedding_for_file_type(file_type)
+        
+        try:
+            if hasattr(embedding_model, 'embed_query'):
+                return embedding_model.embed_query(text)
+            elif hasattr(embedding_model, 'embed_documents'):
+                return embedding_model.embed_documents([text])[0]
+            else:
+                raise ValueError(f"Invalid embedding model for {file_type}")
+        except Exception as e:
+            logger.error(f"Failed to embed query with {file_type} model: {e}, using default")
+            # Fallback to default
+            if hasattr(self.default_embedding, 'embed_query'):
+                return self.default_embedding.embed_query(text)
+            else:
+                raise

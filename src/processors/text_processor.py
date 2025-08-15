@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from src.config import settings
 from ..utils.logging import get_logger
-from .chunking import ChunkingFactory, PythonChunker, CSharpChunker
+from .chunking import ChunkingFactory, PythonChunker, CSharpChunker, JavaScriptChunker, TypeScriptChunker, MarkdownChunker
 from ..config.chunking_config import ChunkingConfigManager
 
 logger = get_logger(__name__)
@@ -95,11 +95,47 @@ class TextProcessor:
             
             self.chunking_factory.register_chunker(csharp_chunker)
             
-            logger.info("Registered chunkers: Python, C#")
+            # Register JavaScript chunker
+            js_config = self.config_manager.get_strategy_config('.js')
+            if js_config:
+                js_chunker = JavaScriptChunker(
+                    max_chunk_size=js_config.max_chunk_size,
+                    chunk_overlap=js_config.chunk_overlap
+                )
+            else:
+                js_chunker = JavaScriptChunker()
+            
+            self.chunking_factory.register_chunker(js_chunker)
+            
+            # Register TypeScript chunker
+            ts_config = self.config_manager.get_strategy_config('.ts')
+            if ts_config:
+                ts_chunker = TypeScriptChunker(
+                    max_chunk_size=ts_config.max_chunk_size,
+                    chunk_overlap=ts_config.chunk_overlap
+                )
+            else:
+                ts_chunker = TypeScriptChunker()
+            
+            self.chunking_factory.register_chunker(ts_chunker)
+            
+            # Register Markdown chunker with diagram awareness
+            md_config = self.config_manager.get_strategy_config('.md')
+            if md_config:
+                markdown_chunker = MarkdownChunker(
+                    max_chunk_size=md_config.max_chunk_size,
+                    chunk_overlap=md_config.chunk_overlap
+                )
+            else:
+                markdown_chunker = MarkdownChunker()
+            
+            self.chunking_factory.register_chunker(markdown_chunker)
+            
+            logger.info("Registered all language-specific chunkers")
             
         except Exception as e:
-            logger.error(f"Error registering chunkers: {str(e)}")
-            raise
+            logger.warning(f"Failed to register chunkers: {str(e)}")
+            logger.info("Enhanced chunking will not be available")
     
     def process_documents(self, documents: List[Document]) -> List[Document]:
         """Process and chunk documents using enhanced or traditional chunking"""

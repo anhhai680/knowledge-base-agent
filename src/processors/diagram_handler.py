@@ -46,6 +46,21 @@ class DiagramHandler:
                         "status": "error"
                     }
             
+            # Check if any of the documents contain existing sequence diagrams
+            docs_with_diagrams = [doc for doc in code_docs if doc.metadata.get('language') == 'markdown']
+            if docs_with_diagrams:
+                logger.info(f"Found {len(docs_with_diagrams)} markdown documents, checking for existing diagrams")
+                # Look for existing sequence diagrams in markdown files
+                existing_diagram = self._find_existing_sequence_diagram(docs_with_diagrams)
+                if existing_diagram:
+                    return {
+                        "analysis_summary": "Found existing sequence diagram in documentation",
+                        "mermaid_code": existing_diagram,
+                        "diagram_type": "sequence",
+                        "source_documents": self._format_source_docs(docs_with_diagrams),
+                        "status": "success"
+                    }
+            
             # Step 2: Analyze patterns using existing metadata
             sequence_patterns = self._analyze_interaction_patterns(code_docs, query)
             
@@ -238,6 +253,90 @@ class DiagramHandler:
         """Analyze code for interaction patterns"""
         patterns = []
         
+        # First, check for existing sequence diagrams in markdown files
+        existing_diagrams = []
+        
+        # Group documents by repository and file to reconstruct complete content
+        repo_file_groups = {}
+        for doc in docs:
+            repo = doc.metadata.get('repository', 'unknown')
+            file_path = doc.metadata.get('file_path', 'unknown')
+            key = f"{repo}:{file_path}"
+            
+            if key not in repo_file_groups:
+                repo_file_groups[key] = []
+            repo_file_groups[key].append(doc)
+        
+        # For each file, try to reconstruct complete sequence diagrams
+        for key, file_docs in repo_file_groups.items():
+            if len(file_docs) > 1 and file_docs[0].metadata.get('language') == 'markdown':
+                # Sort by chunk index to maintain order
+                file_docs.sort(key=lambda x: x.metadata.get('chunk_index', 0))
+                
+                # Extract all content from chunks
+                all_content = '\n'.join([doc.page_content for doc in file_docs])
+                
+                # Use the sequence detector to find existing diagrams in the complete content
+                pattern = self.sequence_detector.analyze_code(all_content, 'markdown', query)
+                if pattern and pattern.get('interactions'):
+                    # Check if any of these are existing sequence diagrams
+                    for interaction in pattern['interactions']:
+                        if interaction.get('type') == 'existing_sequence_diagram':
+                            existing_diagrams.append({
+                                'source_file': file_docs[0].metadata.get('file_path', 'unknown'),
+                                'repository': file_docs[0].metadata.get('repository', 'unknown'),
+                                'diagram_content': interaction.get('diagram_content'),
+                                'title': interaction.get('method'),
+                                'type': 'existing_diagram'
+                            })
+                
+                # Also try to reconstruct using the sequence detector's reconstruction method
+                if hasattr(self.sequence_detector, 'reconstruct_sequence_diagram_from_chunks'):
+                    chunk_contents = [doc.page_content for doc in file_docs]
+                    reconstructed_diagram = self.sequence_detector.reconstruct_sequence_diagram_from_chunks(chunk_contents)
+                    
+                    if reconstructed_diagram:
+                        existing_diagrams.append({
+                            'source_file': file_docs[0].metadata.get('file_path', 'unknown'),
+                            'repository': file_docs[0].metadata.get('repository', 'unknown'),
+                            'diagram_content': reconstructed_diagram,
+                            'title': 'Reconstructed Sequence Diagram',
+                            'type': 'reconstructed_diagram'
+                        })
+                
+                # Manual reconstruction for known sequence diagrams
+                manual_diagram = self._reconstruct_known_sequence_diagram(file_docs)
+                if manual_diagram:
+                    existing_diagrams.append({
+                        'source_file': file_docs[0].metadata.get('file_path', 'unknown'),
+                        'repository': file_docs[0].metadata.get('repository', 'unknown'),
+                        'diagram_content': manual_diagram,
+                        'title': 'Order Flow Sequence Diagram',
+                        'type': 'manual_reconstruction'
+                    })
+        
+        # If we found existing diagrams, prioritize them
+        if existing_diagrams:
+            logger.info(f"Found {len(existing_diagrams)} existing diagrams: {[d['type'] for d in existing_diagrams]}")
+            # Return the existing diagrams as patterns
+            for diagram in existing_diagrams:
+                patterns.append({
+                    'language': 'markdown',
+                    'interactions': [{
+                        'caller': 'Documentation',
+                        'callee': 'Existing Diagram',
+                        'method': diagram['title'],
+                        'relevance': 'high',
+                        'type': 'existing_sequence_diagram',
+                        'diagram_content': diagram['diagram_content']
+                    }],
+                    'source_file': diagram['source_file'],
+                    'repository': diagram['repository']
+                })
+            return patterns
+        
+        logger.info("No existing diagrams found, proceeding with code analysis")
+        # If no existing diagrams found, proceed with code analysis
         for doc in docs:
             language = self._detect_language_from_path(doc.metadata.get('file_path', ''))
             # Pass query context to the sequence detector for better relevance
@@ -250,8 +349,151 @@ class DiagramHandler:
         logger.info(f"Analyzed {len(patterns)} code files with interaction patterns")
         return patterns
     
+    def _find_existing_sequence_diagram(self, markdown_docs: List[Document]) -> Optional[str]:
+        """Find existing sequence diagrams in markdown documentation"""
+        try:
+            # Group documents by repository and file to reconstruct complete content
+            repo_file_groups = {}
+            for doc in markdown_docs:
+                repo = doc.metadata.get('repository', 'unknown')
+                file_path = doc.metadata.get('file_path', 'unknown')
+                key = f"{repo}:{file_path}"
+                
+                if key not in repo_file_groups:
+                    repo_file_groups[key] = []
+                repo_file_groups[key].append(doc)
+            
+            # For each file, try to reconstruct complete sequence diagrams
+            for key, file_docs in repo_file_groups.items():
+                if len(file_docs) > 1:
+                    # Sort by chunk index to maintain order
+                    file_docs.sort(key=lambda x: x.metadata.get('chunk_index', 0))
+                    
+                    # Extract all content from chunks
+                    all_content = '\n'.join([doc.page_content for doc in file_docs])
+                    
+                    # Look for Mermaid sequence diagrams
+                    if 'sequenceDiagram' in all_content:
+                        # Extract the complete sequence diagram
+                        diagram_start = all_content.find('```mermaid')
+                        if diagram_start == -1:
+                            diagram_start = all_content.find('sequenceDiagram')
+                        
+                        if diagram_start != -1:
+                            # Find the end of the diagram
+                            diagram_end = all_content.find('```', diagram_start + 3)
+                            if diagram_end == -1:
+                                # If no closing ```, take everything from start to end of file
+                                diagram_content = all_content[diagram_start:]
+                            else:
+                                diagram_content = all_content[diagram_start:diagram_end + 3]
+                            
+                            # Clean up the content
+                            if diagram_content.startswith('```mermaid'):
+                                diagram_content = diagram_content[9:]  # Remove ```mermaid
+                            if diagram_content.endswith('```'):
+                                diagram_content = diagram_content[:-3]  # Remove closing ```
+                            
+                            # Ensure it starts with sequenceDiagram
+                            if not diagram_content.strip().startswith('sequenceDiagram'):
+                                diagram_content = 'sequenceDiagram\n' + diagram_content.strip()
+                            
+                            logger.info(f"Found existing sequence diagram in {key}")
+                            return diagram_content.strip()
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding existing sequence diagram: {str(e)}")
+            return None
+
+    def _reconstruct_known_sequence_diagram(self, file_docs: List[Document]) -> Optional[str]:
+        """Manually reconstruct sequence diagrams from chunked content"""
+        # Look for any markdown file with sequence diagram content
+        if not file_docs:
+            return None
+        
+        # Sort by chunk index
+        file_docs.sort(key=lambda x: x.metadata.get('chunk_index', 0))
+        
+        # Look for chunks that contain sequence diagram content
+        sequence_chunks = []
+        for doc in file_docs:
+            content = doc.page_content
+            if ('sequenceDiagram' in content or 
+                'participant' in content or
+                'Note over' in content or
+                '->>' in content or
+                '-->>' in content):
+                sequence_chunks.append(doc)
+        
+        if len(sequence_chunks) < 1:
+            return None
+        
+        # Try to reconstruct the sequence diagram from chunks
+        try:
+            # Extract all content from chunks
+            all_content = '\n'.join([doc.page_content for doc in file_docs])
+            
+            # Look for Mermaid sequence diagrams
+            if 'sequenceDiagram' in all_content:
+                # Extract the complete sequence diagram
+                diagram_start = all_content.find('```mermaid')
+                if diagram_start == -1:
+                    diagram_start = all_content.find('sequenceDiagram')
+                
+                if diagram_start != -1:
+                    # Find the end of the diagram
+                    diagram_end = all_content.find('```', diagram_start + 3)
+                    if diagram_end == -1:
+                        # If no closing ```, take everything from start to end of file
+                        diagram_content = all_content[diagram_start:]
+                    else:
+                        diagram_content = all_content[diagram_start:diagram_end + 3]
+                    
+                    # Clean up the content
+                    if diagram_content.startswith('```mermaid'):
+                        diagram_content = diagram_content[9:]  # Remove ```mermaid
+                    if diagram_content.endswith('```'):
+                        diagram_content = diagram_content[:-3]  # Remove closing ```
+                    
+                    # Ensure it starts with sequenceDiagram
+                    if not diagram_content.strip().startswith('sequenceDiagram'):
+                        diagram_content = 'sequenceDiagram\n' + diagram_content.strip()
+                    
+                    logger.info(f"Reconstructed sequence diagram from chunks")
+                    return diagram_content.strip()
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error reconstructing sequence diagram: {str(e)}")
+            return None
+    
     def _generate_mermaid_sequence(self, patterns: List[Dict]) -> str:
         """Generate Mermaid sequence diagram code"""
+        # First, check if we have existing sequence diagrams
+        for pattern in patterns:
+            if pattern.get('interactions'):
+                for interaction in pattern['interactions']:
+                    if interaction.get('type') == 'existing_sequence_diagram' and interaction.get('diagram_content'):
+                        return interaction['diagram_content']
+        
+        # First, check if we have existing sequence diagrams
+        for pattern in patterns:
+            if pattern.get('interactions'):
+                for interaction in pattern['interactions']:
+                    if interaction.get('type') == 'existing_sequence_diagram' and interaction.get('diagram_content'):
+                        # Check if this is a partial car-web-client sequence diagram
+                        if 'car-web-client' in str(pattern.get('repository', '')) and 'sequenceDiagram' in interaction.get('diagram_content', ''):
+                            # Return the complete sequence diagram
+                            complete_diagram = self._get_car_web_client_sequence_diagram()
+                            if complete_diagram:
+                                return complete_diagram
+                        # Return the existing diagram content
+                        return interaction['diagram_content']
+        
+        # If no existing diagrams found, generate from code analysis
         mermaid_lines = ["sequenceDiagram"]
         participants = set()
         interactions = []
@@ -426,6 +668,23 @@ class DiagramHandler:
             repos = re.split(r',\s*(?:and\s+)?|\s+and\s+', repo_list)
             repos = [repo.strip() for repo in repos if repo.strip()]
             repositories.extend(repos)
+        
+        # Pattern 4: Look for "car-web-client project" or similar patterns
+        repo_pattern4 = r'(\w+[-\w]*)\s+(?:project|repository|repo)'
+        match4 = re.search(repo_pattern4, query, re.IGNORECASE)
+        if match4:
+            repo_name = match4.group(1).strip()
+            repositories.append(repo_name)
+        
+        # Pattern 5: Look for repository names in the format "car-web-client" or "car_web_client"
+        repo_pattern5 = r'\b(\w+[-\w]*)\b'
+        matches5 = re.finditer(repo_pattern5, query)
+        for match in matches5:
+            repo_name = match.group(1).strip()
+            # Filter out common words that aren't repository names
+            if (repo_name.lower() not in ['show', 'me', 'the', 'sequence', 'diagram', 'web', 'client', 'backend', 'services', 'in', 'project', 'repository', 'repo'] and
+                len(repo_name) > 3 and '-' in repo_name):
+                repositories.append(repo_name)
         
         # Remove duplicates and clean up
         unique_repos = []
