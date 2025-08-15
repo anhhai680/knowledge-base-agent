@@ -19,6 +19,7 @@ class IndexRequest(BaseModel):
     repository_urls: List[str]
     branch: Optional[str] = "main"
     file_patterns: Optional[List[str]] = None
+    force: Optional[bool] = False
 
 class IndexResponse(BaseModel):
     message: str

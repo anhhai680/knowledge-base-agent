@@ -112,26 +112,44 @@ class CSharpChunker(BaseChunker):
             # Clean the content
             cleaned_content = self._clean_content(document.page_content)
             
+            # Enhanced content logging for debugging
+            file_path = document.metadata.get('file_path', 'unknown')
+            print(f"🔍 DEBUG: Processing C# file: {file_path}")
+            print(f"🔍 DEBUG: Original content length: {len(document.page_content)} chars")
+            print(f"🔍 DEBUG: Cleaned content length: {len(cleaned_content)} chars")
+            print(f"🔍 DEBUG: Content preview (first 500 chars): {repr(cleaned_content[:500])}")
+            
+            logger.info(f"Processing C# file: {file_path}")
+            logger.info(f"Original content length: {len(document.page_content)} chars")
+            logger.info(f"Cleaned content length: {len(cleaned_content)} chars")
+            logger.info(f"Content preview (first 500 chars): {repr(cleaned_content[:500])}")
+            
             if not cleaned_content.strip():
-                logger.warning("Empty C# document content after cleaning")
+                logger.warning(f"Empty C# document content after cleaning for {file_path}")
                 return []
             
             # Try advanced parsing first
             if self.use_advanced_parsing and self.advanced_parser:
+                logger.info(f"Attempting advanced parsing for {document.metadata.get('file_path', 'unknown')}")
                 try:
-                    return self._chunk_with_advanced_parsing(document, cleaned_content)
+                    result = self._chunk_with_advanced_parsing(document, cleaned_content)
+                    logger.info(f"Advanced parsing successful for {document.metadata.get('file_path', 'unknown')}: {len(result)} chunks")
+                    return result
                 except (FallbackError, AdvancedParserError) as e:
                     logger.warning(f"Advanced parsing failed, falling back to regex: {e}")
                 except Exception as e:
                     logger.error(f"Unexpected error in advanced parsing: {e}")
+            else:
+                logger.info(f"Advanced parsing disabled or parser not available for {document.metadata.get('file_path', 'unknown')}")
             
             # Fall back to regex-based parsing
-            logger.info("Using regex-based C# parsing")
+            logger.info(f"Using regex-based C# parsing for {document.metadata.get('file_path', 'unknown')}")
             return self._chunk_with_regex_parsing(document, cleaned_content)
             
         except Exception as e:
-            logger.error(f"Error in C# chunking: {str(e)}")
+            logger.error(f"Error in C# chunking for {document.metadata.get('file_path', 'unknown')}: {str(e)}")
             # Ultimate fallback - simple text chunking
+            logger.info(f"Using ultimate fallback chunking for {document.metadata.get('file_path', 'unknown')}")
             return self._fallback_chunk(document, cleaned_content)
     
     def _chunk_with_advanced_parsing(self, document: Document, content: str) -> List[Document]:
@@ -147,14 +165,35 @@ class CSharpChunker(BaseChunker):
         """
         # Parse with tree-sitter
         file_path = document.metadata.get('file_path', 'unknown.cs')
-        parse_result = self.advanced_parser.parse(content, file_path)
+        
+        # Enhanced logging for debugging
+        print(f"🔍 DEBUG: Starting advanced parsing for {file_path} ({len(content)} chars)")
+        print(f"🔍 DEBUG: Content preview: {content[:200]}...")
+        
+        logger.info(f"Starting advanced parsing for {file_path} ({len(content)} chars)")
+        logger.info(f"Content preview: {content[:200]}...")
+        
+        try:
+            parse_result = self.advanced_parser.parse(content, file_path)
+            logger.info(f"Parse result: success={parse_result.success}, elements={len(parse_result.elements)}, errors={parse_result.errors}")
+        except Exception as e:
+            logger.error(f"Advanced parser threw exception for {file_path}: {e}")
+            logger.info("Falling back to regex parsing due to parser exception")
+            return self._chunk_with_regex_parsing(document, content)
         
         if not parse_result.success:
+            logger.warning(f"Advanced parsing failed for {file_path}: {'; '.join(parse_result.errors)}")
             raise FallbackError(f"Advanced parsing failed: {'; '.join(parse_result.errors)}")
         
         if not parse_result.elements:
-            logger.warning("No semantic elements extracted from C# code")
-            raise FallbackError("No semantic elements found")
+            print(f"🔍 DEBUG: No semantic elements extracted from C# code in {file_path}")
+            print(f"🔍 DEBUG: Parse result details: success={parse_result.success}, errors={parse_result.errors}")
+            
+            logger.warning(f"No semantic elements extracted from C# code in {file_path}")
+            logger.debug(f"Parse result details: success={parse_result.success}, errors={parse_result.errors}")
+            # Don't raise an error, just log and continue with fallback
+            logger.info("Proceeding with regex-based parsing as fallback")
+            return self._chunk_with_regex_parsing(document, content)
         
         # Convert semantic elements to chunks
         chunked_documents = []
@@ -182,53 +221,6 @@ class CSharpChunker(BaseChunker):
                 chunked_documents.append(chunk_doc)
         
         logger.debug(f"Created {len(chunked_documents)} chunks from C# document using tree-sitter")
-        return chunked_documents
-    
-    def _chunk_with_regex_parsing(self, document: Document, content: str) -> List[Document]:
-        """
-        Chunk C# document using legacy regex-based parsing.
-        
-        Args:
-            document: Original document
-            content: Cleaned content to parse
-            
-        Returns:
-            List of chunked documents
-        """
-        # Parse C# elements using regex
-        elements = self._parse_csharp_code(content)
-        
-        if not elements:
-            logger.warning("No C# semantic elements found, using fallback chunking")
-            return self._fallback_chunk(document, content)
-        
-        # Group elements into logical chunks
-        chunk_groups = self._group_csharp_elements(elements)
-        
-        # Create documents from chunk groups
-        chunked_documents = []
-        for i, chunk_group in enumerate(chunk_groups):
-            chunk_content = self._create_chunk_content(chunk_group, content)
-            
-            if not chunk_content.strip():
-                continue
-            
-            # Check if chunk is too large and split if necessary
-            if len(chunk_content) > self.max_chunk_size:
-                sub_chunks = self._split_csharp_chunk(chunk_content, chunk_group)
-                for j, sub_chunk in enumerate(sub_chunks):
-                    if sub_chunk.strip():
-                        sub_doc = self._create_chunk_document_from_group(
-                            sub_chunk, document, chunk_group, f"{i}.{j}", len(chunk_groups)
-                        )
-                        chunked_documents.append(sub_doc)
-            else:
-                chunk_doc = self._create_chunk_document_from_group(
-                    chunk_content, document, chunk_group, str(i), len(chunk_groups)
-                )
-                chunked_documents.append(chunk_doc)
-        
-        logger.debug(f"Created {len(chunked_documents)} chunks from C# document using regex")
         return chunked_documents
     
     def _group_semantic_elements(self, elements: List[SemanticElement]) -> List[List[SemanticElement]]:
@@ -389,12 +381,12 @@ class CSharpChunker(BaseChunker):
             # Find parent context
             parent_symbol = None
             for element in elements:
-                if element.parent_name:
+                if hasattr(element, 'parent_name') and element.parent_name:
                     parent_symbol = element.parent_name
                     break
             
             # Check for documentation
-            has_docs = any(e.has_documentation for e in elements)
+            has_docs = any(getattr(e, 'has_documentation', False) for e in elements)
             
             chunk_metadata = ChunkMetadata(
                 source=original_doc.metadata.get('source', 'unknown'),
@@ -403,8 +395,8 @@ class CSharpChunker(BaseChunker):
                 chunk_type=chunk_type,
                 symbol_name=primary_symbol,
                 parent_symbol=parent_symbol,
-                line_start=min(e.position.start_line for e in elements),
-                line_end=max(e.position.end_line for e in elements),
+                line_start=min(e.position.start_line for e in elements) if elements else None,
+                line_end=max(e.position.end_line for e in elements) if elements else None,
                 language="csharp",
                 contains_documentation=has_docs,
                 # Tree-sitter specific metadata
@@ -461,12 +453,73 @@ class CSharpChunker(BaseChunker):
         
         return '\n'.join(header_lines).strip()
     
-    def _parse_csharp_code(self, code: str) -> List[CSharpElement]:
+    def _chunk_with_regex_parsing(self, document: Document, content: str) -> List[Document]:
+        """
+        Chunk C# document using legacy regex-based parsing.
+        
+        Args:
+            document: Original document
+            content: Cleaned content to parse
+            
+        Returns:
+            List of chunked documents
+        """
+        file_path = document.metadata.get('file_path', 'unknown')
+        print(f"🔍 DEBUG: Starting regex parsing for {file_path} ({len(content)} chars)")
+        
+        logger.info(f"Starting regex parsing for {file_path} ({len(content)} chars)")
+        
+        # Parse C# elements using regex
+        elements = self._parse_csharp_code(content, file_path)
+        print(f"🔍 DEBUG: Regex parsing found {len(elements)} elements for {file_path}")
+        logger.info(f"Regex parsing found {len(elements)} elements for {file_path}")
+        
+        if not elements:
+            print(f"🔍 DEBUG: No C# semantic elements found via regex for {file_path}, using fallback chunking")
+            print(f"🔍 DEBUG: Content that regex failed to parse: {repr(content[:300])}")
+            
+            logger.warning(f"No C# semantic elements found via regex for {file_path}, using fallback chunking")
+            logger.info(f"Content that regex failed to parse: {repr(content[:300])}")
+            # Try to create at least one chunk with the entire content
+            logger.info(f"Creating single chunk with entire C# content for {file_path}")
+            return self._create_single_chunk_fallback(document, content)
+        
+        # Group elements into logical chunks
+        chunk_groups = self._group_csharp_elements(elements)
+        
+        # Create documents from chunk groups
+        chunked_documents = []
+        for i, chunk_group in enumerate(chunk_groups):
+            chunk_content = self._create_chunk_content(chunk_group, content)
+            
+            if not chunk_content.strip():
+                continue
+            
+            # Check if chunk is too large and split if necessary
+            if len(chunk_content) > self.max_chunk_size:
+                sub_chunks = self._split_csharp_chunk(chunk_content, chunk_group)
+                for j, sub_chunk in enumerate(sub_chunks):
+                    if sub_chunk.strip():
+                        sub_doc = self._create_chunk_document_from_group(
+                            sub_chunk, document, chunk_group, f"{i}.{j}", len(chunk_groups)
+                        )
+                        chunked_documents.append(sub_doc)
+            else:
+                chunk_doc = self._create_chunk_document_from_group(
+                    chunk_content, document, chunk_group, str(i), len(chunk_groups)
+                )
+                chunked_documents.append(chunk_doc)
+        
+        logger.debug(f"Created {len(chunked_documents)} chunks from C# document using regex")
+        return chunked_documents
+    
+    def _parse_csharp_code(self, code: str, file_path: str = "unknown") -> List[CSharpElement]:
         """
         Parse C# code and extract semantic elements.
         
         Args:
             code: C# source code to parse
+            file_path: File path for logging purposes
             
         Returns:
             List of CSharpElement objects representing semantic chunks
@@ -480,6 +533,9 @@ class CSharpChunker(BaseChunker):
             if self.using_pattern.match(line):
                 using_lines.append(i)
         
+        print(f"🔍 DEBUG: Found {len(using_lines)} using statements at lines: {using_lines}")
+        logger.info(f"Found {len(using_lines)} using statements at lines: {using_lines}")
+        
         if using_lines:
             elements.append(CSharpElement(
                 name="__usings__",
@@ -490,7 +546,11 @@ class CSharpChunker(BaseChunker):
             ))
         
         # Find namespaces
-        for match in self.namespace_pattern.finditer(code):
+        namespace_matches = list(self.namespace_pattern.finditer(code))
+        print(f"🔍 DEBUG: Found {len(namespace_matches)} namespace declarations")
+        logger.info(f"Found {len(namespace_matches)} namespace declarations")
+        
+        for match in namespace_matches:
             namespace_name = match.group(1)
             start_line = code[:match.start()].count('\n') + 1
             
@@ -504,25 +564,39 @@ class CSharpChunker(BaseChunker):
             ))
         
         # Find classes, interfaces, structs, enums
-        for match in self.class_pattern.finditer(code):
+        class_matches = list(self.class_pattern.finditer(code))
+        print(f"🔍 DEBUG: Found {len(class_matches)} class/interface/struct/enum declarations")
+        logger.info(f"Found {len(class_matches)} class/interface/struct/enum declarations")
+        
+        for match in class_matches:
             access_modifier = match.group(1) or "internal"
             class_type = match.group(3)
             class_name = match.group(4)
             start_line = code[:match.start()].count('\n') + 1
             
-            # Find class body using regex for balanced braces
-            class_body_pattern = re.compile(r'\{(?:[^{}]*|(?R))*\}')
-            class_body_match = class_body_pattern.search(code, match.end())
+            # Find class body using balanced brace counting
+            class_start = match.end()
+            brace_count = 0
+            class_end = class_start
             
-            if class_body_match:
-                class_end = class_body_match.end()
+            for i, char in enumerate(code[class_start:], class_start):
+                if char == '{':
+                    if brace_count == 0:
+                        class_start = i  # Start of class body
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        class_end = i + 1  # End of class body
+                        break
+            
+            if class_end > class_start:
                 class_content = code[match.start():class_end]
                 end_line = code[:class_end].count('\n') + 1
             else:
-                logger.warning(f"Could not find class body for {class_name}")
-                class_end = match.end()
-                class_content = code[match.start():class_end]
-                end_line = code[:class_end].count('\n') + 1
+                logger.warning(f"Could not find complete class body for {class_name}")
+                class_content = code[match.start():match.end()]
+                end_line = start_line
             
             elements.append(CSharpElement(
                 name=class_name,
@@ -533,40 +607,7 @@ class CSharpChunker(BaseChunker):
                 access_modifier=access_modifier
             ))
         
-        # Find methods within classes (simplified)
-        for match in self.method_pattern.finditer(code):
-            access_modifier = match.group(1) or "private"
-            return_type = match.group(3)
-            method_name = match.group(4)
-            start_line = code[:match.start()].count('\n') + 1
-            
-            # Simplified method end detection
-            method_start = match.end()
-            if code[method_start-1:method_start] == '{':
-                brace_count = 1
-                method_end = method_start
-                
-                for i, char in enumerate(code[method_start:], method_start):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            method_end = i + 1
-                            break
-                
-                end_line = code[:method_end].count('\n') + 1
-                method_content = code[match.start():method_end]
-                
-                elements.append(CSharpElement(
-                    name=method_name,
-                    element_type="method",
-                    start_line=start_line,
-                    end_line=end_line,
-                    content=method_content,
-                    access_modifier=access_modifier
-                ))
-        
+        logger.info(f"Regex parsing summary for {file_path}: {len(elements)} total elements found")
         return sorted(elements, key=lambda x: x.start_line)
     
     def _group_csharp_elements(self, elements: List[CSharpElement]) -> List[List[CSharpElement]]:
@@ -752,6 +793,60 @@ class CSharpChunker(BaseChunker):
             )
             return super()._split_oversized_chunk(content, dummy_metadata)
     
+    def _create_single_chunk_fallback(self, document: Document, content: str) -> List[Document]:
+        """
+        Create a single chunk with the entire C# content when parsing fails.
+        
+        Args:
+            document: Original document
+            content: Content to chunk
+            
+        Returns:
+            List with single chunk document
+        """
+        # Create metadata for the single chunk
+        chunk_metadata = ChunkMetadata(
+            source=document.metadata.get('source', 'unknown'),
+            file_path=document.metadata.get('file_path', 'unknown'),
+            file_type=".cs",
+            chunk_type="csharp_file",
+            language="csharp",
+            contains_documentation=self._contains_xml_docs(content),
+            parsing_method="fallback_single_chunk"
+        )
+        
+        # Create single chunk document
+        chunk_doc = self._create_chunk_document(
+            content=content,
+            original_metadata=document.metadata,
+            chunk_metadata=chunk_metadata,
+            chunk_index=0,
+            total_chunks=1
+        )
+        
+        logger.info(f"Created single fallback chunk for C# file: {document.metadata.get('file_path', 'unknown')}")
+        return [chunk_doc]
+    
+    def _fallback_chunk(self, document: Document, content: str) -> List[Document]:
+        """
+        Fallback to simple text chunking when C# parsing fails.
+        
+        Args:
+            document: Original document
+            content: Content to parse
+            
+        Returns:
+            List of simply chunked documents
+        """
+        file_path = document.metadata.get('file_path', 'unknown')
+        logger.warning(f"Using ultimate fallback chunking for C# document: {file_path}")
+        
+        from .fallback_chunker import FallbackChunker
+        
+        fallback_chunker = FallbackChunker(self.max_chunk_size, self.chunk_overlap)
+        temp_doc = Document(page_content=content, metadata=document.metadata)
+        return fallback_chunker.chunk_document(temp_doc)
+    
     def _contains_xml_docs(self, content: str) -> bool:
         """
         Check if content contains XML documentation comments.
@@ -772,20 +867,3 @@ class CSharpChunker(BaseChunker):
         
         content_lower = content.lower()
         return any(pattern.lower() in content_lower for pattern in xml_doc_patterns)
-    
-    def _fallback_chunk(self, document: Document, content: str) -> List[Document]:
-        """
-        Fallback to simple text chunking when C# parsing fails.
-        
-        Args:
-            document: Original document
-            content: Content to chunk
-            
-        Returns:
-            List of simply chunked documents
-        """
-        from .fallback_chunker import FallbackChunker
-        
-        fallback_chunker = FallbackChunker(self.max_chunk_size, self.chunk_overlap)
-        temp_doc = Document(page_content=content, metadata=document.metadata)
-        return fallback_chunker.chunk_document(temp_doc)

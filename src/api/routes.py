@@ -108,6 +108,15 @@ async def restore_indexed_repositories():
                     repo_docs = [i for i, meta in enumerate(metadatas) 
                                if meta and meta.get("repository") == repo_url] if metadatas else []
                     
+                    # Count unique source files instead of chunks
+                    source_files = set()
+                    for meta in metadatas:
+                        if meta and meta.get("repository") == repo_url:
+                            # Extract source file path from metadata
+                            source_file = meta.get("file_path", "")
+                            if source_file:
+                                source_files.add(source_file)
+                    
                     # Extract branch and indexed_at from metadata if available
                     branch = "main"  # Default branch
                     last_indexed = datetime.now().isoformat()  # Default timestamp
@@ -126,13 +135,13 @@ async def restore_indexed_repositories():
                         description=f"Repository: {repo_url}",
                         branch=branch,
                         status="indexed",
-                        documents_count=len(repo_docs),
+                        documents_count=len(source_files),  # Count source files, not chunks
                         last_indexed=last_indexed,
                         error=None
                     )
                     
                     indexed_repositories[repo_id] = repo_info
-                    logger.info(f"Restored repository: {repo_url} with {len(repo_docs)} documents")
+                    logger.info(f"Restored repository: {repo_url} with {len(source_files)} source files ({len(repo_docs)} chunks)")
                     
             except Exception as e:
                 logger.error(f"Error processing collection {collection.name}: {str(e)}")
@@ -383,7 +392,7 @@ async def index_repository(request: IndexRequest, background_tasks: BackgroundTa
         
         for repo_url in request.repository_urls:
             repo_name = repo_url.split("/")[-1]
-            if repo_name in indexed_repositories:
+            if repo_name in indexed_repositories and not getattr(request, 'force', False):
                 already_indexed.append(repo_name)
             else:
                 to_index.append(repo_url)
@@ -471,7 +480,8 @@ async def index_single_repository_task(repo_url: str, branch: str = "main", file
         documents = github_loader.load_repository(
             repo_url=repo_url,
             branch=branch,
-            file_patterns=file_patterns or ["*.py", "*.js", "*.ts", "*.md", "*.txt"]
+            # Pass through provided patterns; if None, loader will use supported extensions from settings
+            file_patterns=file_patterns
         )
         
         if not documents:
@@ -501,12 +511,18 @@ async def index_single_repository_task(repo_url: str, branch: str = "main", file
             
         rag_agent.add_documents(processed_docs)
         
-        # Update repository info
-        indexed_repositories[repo_name].documents_count = len(processed_docs)
+        # Update repository info - count unique source files, not chunks
+        source_files = set()
+        for doc in processed_docs:
+            source_file = doc.metadata.get("file_path", "")
+            if source_file:
+                source_files.add(source_file)
+        
+        indexed_repositories[repo_name].documents_count = len(source_files)
         indexed_repositories[repo_name].status = "indexed"
         indexed_repositories[repo_name].last_indexed = datetime.now().isoformat()
         
-        logger.info(f"Successfully indexed {len(processed_docs)} documents from {repo_url}")
+        logger.info(f"Successfully indexed {len(source_files)} source files ({len(processed_docs)} chunks) from {repo_url}")
         
     except Exception as e:
         logger.error(f"Error indexing repository {repo_url}: {str(e)}")
