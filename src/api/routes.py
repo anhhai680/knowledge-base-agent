@@ -119,7 +119,7 @@ async def restore_indexed_repositories():
                             branch = first_meta.get("branch", "main")
                             last_indexed = first_meta.get("indexed_at", last_indexed)
                     
-                    indexed_repositories[repo_id] = RepositoryInfo(
+                    repo_info = RepositoryInfo(
                         id=repo_id,
                         url=repo_url,
                         name=repo_id,
@@ -131,6 +131,7 @@ async def restore_indexed_repositories():
                         error=None
                     )
                     
+                    indexed_repositories[repo_id] = repo_info
                     logger.info(f"Restored repository: {repo_url} with {len(repo_docs)} documents")
                     
             except Exception as e:
@@ -518,12 +519,15 @@ async def index_repository_task(repo_url: str, branch: str = "main", file_patter
     """Background task to index a repository (legacy)"""
     return await index_single_repository_task(repo_url, branch, file_patterns)
 
-@app.get("/repositories")
+@app.get("/repositories", response_model=List[RepositoryInfo])
 async def get_repositories():
     """Get all indexed repositories"""
-    # If empty, try to restore from database
-    if not indexed_repositories:
-        await restore_indexed_repositories()
+    global indexed_repositories
+    
+    # Clear existing data and force fresh restore to ensure we have the latest model structure
+    indexed_repositories.clear()
+    await restore_indexed_repositories()
+    
     return list(indexed_repositories.values())
 
 @app.delete("/repositories/{repository_id}")
