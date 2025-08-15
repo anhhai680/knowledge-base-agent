@@ -12,6 +12,9 @@ import uvicorn
 from src.config.settings import settings
 from src.utils.logging import setup_logging, get_logger
 
+# Import app at module level for uvicorn
+from src.api.routes import app
+
 def main():
     """Main application entry point"""
     try:
@@ -22,9 +25,6 @@ def main():
         logger.info("Starting Knowledge Base Agent...")
         logger.info(f"Environment: {settings.app_env}")
         logger.info(f"API will be available at: http://{settings.api_host}:{settings.api_port}")
-        
-        # Import app after settings are loaded
-        from src.api.routes import app
         
         # Run the application
         # Disable reload in containerized environments to prevent restart loops

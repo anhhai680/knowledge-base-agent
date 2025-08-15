@@ -1,5 +1,5 @@
 services:
-  knowledge-base-agent:
+  kb-agent:
     build: .
     ports:
       - "8000:8000"
@@ -32,6 +32,7 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./chroma_db:/app/chroma_db
+      - ./src:/app/src  # Mount source code for development
     restart: unless-stopped
   
   ollama:
@@ -66,7 +67,7 @@ services:
     volumes:
       - ./web/index.html:/usr/share/nginx/html/index.html
     depends_on:
-      - knowledge-base-agent
+      - kb-agent
 
 volumes:
   ollama_data:
