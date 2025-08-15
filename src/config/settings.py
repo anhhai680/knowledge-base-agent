@@ -56,9 +56,8 @@ class Settings(BaseSettings):
     chunking_config_path: Optional[str] = None
     
     # File-Type-Aware Embedding Settings
-    use_file_type_aware_embeddings: bool = True  # Enable different embedding models for different file types
-    markdown_embedding_model: str = "text-embedding-3-large"  # Best for markdown with diagrams
-    code_embedding_model: str = "text-embedding-3-small"  # Good for code files
+    use_file_type_aware_embeddings: bool = False  # Disabled to prevent dimension mismatches
+    # Removed redundant model settings - using main embedding_model for all file types
     
     # API Settings
     api_host: str = "0.0.0.0"

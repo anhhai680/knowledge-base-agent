@@ -46,19 +46,18 @@ class DiagramHandler:
                         "status": "error"
                     }
             
-            # Check if any of the documents are from car-web-client repository
-            car_web_client_docs = [doc for doc in code_docs if 'car-web-client' in doc.metadata.get('repository', '')]
-            logger.info(f"Found {len(car_web_client_docs)} car-web-client documents")
-            if car_web_client_docs:
-                logger.info("Car-web-client repository detected, returning known sequence diagram")
-                # Return the known sequence diagram directly
-                known_diagram = self._get_car_web_client_sequence_diagram()
-                if known_diagram:
+            # Check if any of the documents contain existing sequence diagrams
+            docs_with_diagrams = [doc for doc in code_docs if doc.metadata.get('language') == 'markdown']
+            if docs_with_diagrams:
+                logger.info(f"Found {len(docs_with_diagrams)} markdown documents, checking for existing diagrams")
+                # Look for existing sequence diagrams in markdown files
+                existing_diagram = self._find_existing_sequence_diagram(docs_with_diagrams)
+                if existing_diagram:
                     return {
-                        "analysis_summary": "Found existing sequence diagram for Car Web Client ↔ Backend Services",
-                        "mermaid_code": known_diagram,
+                        "analysis_summary": "Found existing sequence diagram in documentation",
+                        "mermaid_code": existing_diagram,
                         "diagram_type": "sequence",
-                        "source_documents": self._format_source_docs(car_web_client_docs),
+                        "source_documents": self._format_source_docs(docs_with_diagrams),
                         "status": "success"
                     }
             
@@ -350,10 +349,68 @@ class DiagramHandler:
         logger.info(f"Analyzed {len(patterns)} code files with interaction patterns")
         return patterns
     
+    def _find_existing_sequence_diagram(self, markdown_docs: List[Document]) -> Optional[str]:
+        """Find existing sequence diagrams in markdown documentation"""
+        try:
+            # Group documents by repository and file to reconstruct complete content
+            repo_file_groups = {}
+            for doc in markdown_docs:
+                repo = doc.metadata.get('repository', 'unknown')
+                file_path = doc.metadata.get('file_path', 'unknown')
+                key = f"{repo}:{file_path}"
+                
+                if key not in repo_file_groups:
+                    repo_file_groups[key] = []
+                repo_file_groups[key].append(doc)
+            
+            # For each file, try to reconstruct complete sequence diagrams
+            for key, file_docs in repo_file_groups.items():
+                if len(file_docs) > 1:
+                    # Sort by chunk index to maintain order
+                    file_docs.sort(key=lambda x: x.metadata.get('chunk_index', 0))
+                    
+                    # Extract all content from chunks
+                    all_content = '\n'.join([doc.page_content for doc in file_docs])
+                    
+                    # Look for Mermaid sequence diagrams
+                    if 'sequenceDiagram' in all_content:
+                        # Extract the complete sequence diagram
+                        diagram_start = all_content.find('```mermaid')
+                        if diagram_start == -1:
+                            diagram_start = all_content.find('sequenceDiagram')
+                        
+                        if diagram_start != -1:
+                            # Find the end of the diagram
+                            diagram_end = all_content.find('```', diagram_start + 3)
+                            if diagram_end == -1:
+                                # If no closing ```, take everything from start to end of file
+                                diagram_content = all_content[diagram_start:]
+                            else:
+                                diagram_content = all_content[diagram_start:diagram_end + 3]
+                            
+                            # Clean up the content
+                            if diagram_content.startswith('```mermaid'):
+                                diagram_content = diagram_content[9:]  # Remove ```mermaid
+                            if diagram_content.endswith('```'):
+                                diagram_content = diagram_content[:-3]  # Remove closing ```
+                            
+                            # Ensure it starts with sequenceDiagram
+                            if not diagram_content.strip().startswith('sequenceDiagram'):
+                                diagram_content = 'sequenceDiagram\n' + diagram_content.strip()
+                            
+                            logger.info(f"Found existing sequence diagram in {key}")
+                            return diagram_content.strip()
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding existing sequence diagram: {str(e)}")
+            return None
+
     def _reconstruct_known_sequence_diagram(self, file_docs: List[Document]) -> Optional[str]:
-        """Manually reconstruct known sequence diagrams from chunked content"""
-        # Look for the car-web-client sequence diagram
-        if not file_docs or file_docs[0].metadata.get('file_path') != 'README.md':
+        """Manually reconstruct sequence diagrams from chunked content"""
+        # Look for any markdown file with sequence diagram content
+        if not file_docs:
             return None
         
         # Sort by chunk index
@@ -373,62 +430,54 @@ class DiagramHandler:
         if len(sequence_chunks) < 1:
             return None
         
-        # For car-web-client, we know the complete sequence diagram
-        # Return it directly since the chunks are too small to reconstruct properly
-        reconstructed_content = """sequenceDiagram
-    participant User
-    participant WebClient as Car Web Client
-    participant ListingService as Car Listing Service
-    participant OrderService as Order Service
-    participant NotificationService as Notification Service
-
-    Note over User,NotificationService: 1. Browse Car Listings (✅ API Integrated)
-    User->>WebClient: View Home Page
-    WebClient->>ListingService: GET /Car
-    ListingService-->>WebClient: List of cars (MongoDB)
-    WebClient-->>User: Display car listings with search/filter
-
-    Note over User,NotificationService: 2. View Car Details (✅ API Integrated)
-    User->>WebClient: Click on car listing
-    WebClient->>ListingService: GET /Car/{id}
-    ListingService-->>WebClient: Car details (id, brand, model, year, mileage, condition, price, description)
-    WebClient-->>User: Display car details page
-
-    Note over User,NotificationService: 3. Create/Edit Listing (❌ Mock Data)
-    User->>WebClient: Submit car listing form
-    Note right of WebClient: Currently uses mock data<br/>TODO: Implement POST/PUT /Car
-
-    Note over User,NotificationService: 4. Place Order (❌ Mock Data)
-    User->>WebClient: Click "Buy Now" or "Rent"
-    Note right of WebClient: Currently uses mock data<br/>TODO: Implement POST /Order
-
-    Note over User,NotificationService: 5. View Orders (❌ Mock Data)
-    User->>WebClient: Navigate to Orders page
-    Note right of WebClient: Currently uses mock data<br/>TODO: Implement GET /Order
-
-    Note over User,NotificationService: 6. View Notifications (❌ Mock Data)
-    User->>WebClient: Navigate to Notifications
-    Note right of WebClient: Currently uses mock data<br/>TODO: Implement GET /Notification
-
-    Note over User,NotificationService: 7. User Authentication (❌ Mock Data)
-    User->>WebClient: Login/Register
-    Note right of WebClient: Currently uses mock data<br/>TODO: Implement auth endpoints
-
-    Note over User,NotificationService: 8. Profile Management (❌ Mock Data)
-    User->>WebClient: Update profile
-    Note right of WebClient: Currently uses mock data<br/>TODO: Implement user profile endpoints"""
-        
-        return reconstructed_content
+        # Try to reconstruct the sequence diagram from chunks
+        try:
+            # Extract all content from chunks
+            all_content = '\n'.join([doc.page_content for doc in file_docs])
+            
+            # Look for Mermaid sequence diagrams
+            if 'sequenceDiagram' in all_content:
+                # Extract the complete sequence diagram
+                diagram_start = all_content.find('```mermaid')
+                if diagram_start == -1:
+                    diagram_start = all_content.find('sequenceDiagram')
+                
+                if diagram_start != -1:
+                    # Find the end of the diagram
+                    diagram_end = all_content.find('```', diagram_start + 3)
+                    if diagram_end == -1:
+                        # If no closing ```, take everything from start to end of file
+                        diagram_content = all_content[diagram_start:]
+                    else:
+                        diagram_content = all_content[diagram_start:diagram_end + 3]
+                    
+                    # Clean up the content
+                    if diagram_content.startswith('```mermaid'):
+                        diagram_content = diagram_content[9:]  # Remove ```mermaid
+                    if diagram_content.endswith('```'):
+                        diagram_content = diagram_content[:-3]  # Remove closing ```
+                    
+                    # Ensure it starts with sequenceDiagram
+                    if not diagram_content.strip().startswith('sequenceDiagram'):
+                        diagram_content = 'sequenceDiagram\n' + diagram_content.strip()
+                    
+                    logger.info(f"Reconstructed sequence diagram from chunks")
+                    return diagram_content.strip()
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error reconstructing sequence diagram: {str(e)}")
+            return None
     
     def _generate_mermaid_sequence(self, patterns: List[Dict]) -> str:
         """Generate Mermaid sequence diagram code"""
-        # Check if any patterns are from car-web-client repository
+        # First, check if we have existing sequence diagrams
         for pattern in patterns:
-            if 'car-web-client' in str(pattern.get('repository', '')):
-                # Return the complete car-web-client sequence diagram
-                complete_diagram = self._get_car_web_client_sequence_diagram()
-                if complete_diagram:
-                    return complete_diagram
+            if pattern.get('interactions'):
+                for interaction in pattern['interactions']:
+                    if interaction.get('type') == 'existing_sequence_diagram' and interaction.get('diagram_content'):
+                        return interaction['diagram_content']
         
         # First, check if we have existing sequence diagrams
         for pattern in patterns:

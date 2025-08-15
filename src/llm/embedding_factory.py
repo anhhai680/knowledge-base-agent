@@ -233,20 +233,20 @@ class MultiModelEmbeddingWrapper:
         # Get configuration from settings
         from ..config.settings import settings
         
-        # Use configured models or defaults
+        # Use main embedding model for all file types to ensure consistency
         self._file_type_models = {
-            '.md': settings.markdown_embedding_model,  # Best for markdown with diagrams
-            '.markdown': settings.markdown_embedding_model,
-            '.py': settings.code_embedding_model,  # Good for code
-            '.js': settings.code_embedding_model,
-            '.ts': settings.code_embedding_model,
-            '.jsx': settings.code_embedding_model,
-            '.tsx': settings.code_embedding_model,
-            '.cs': settings.code_embedding_model,
-            '.java': settings.code_embedding_model,
-            '.json': settings.code_embedding_model,
-            '.yml': settings.code_embedding_model,
-            '.yaml': settings.code_embedding_model
+            '.md': settings.embedding_model,  # Use main model for markdown
+            '.markdown': settings.embedding_model,
+            '.py': settings.embedding_model,  # Use main model for code
+            '.js': settings.embedding_model,
+            '.ts': settings.embedding_model,
+            '.jsx': settings.embedding_model,
+            '.tsx': settings.embedding_model,
+            '.cs': settings.embedding_model,
+            '.java': settings.embedding_model,
+            '.json': settings.embedding_model,
+            '.yml': settings.embedding_model,
+            '.yaml': settings.embedding_model
         }
     
     def _get_embedding_for_file_type(self, file_type: str) -> Any:

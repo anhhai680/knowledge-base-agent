@@ -26,23 +26,7 @@ class MarkdownChunker(BaseChunker):
             chunk_size=max_chunk_size,
             chunk_overlap=chunk_overlap,
             # Preserve markdown structure
-            keep_separator=True,
-            # Handle code blocks and diagrams properly
-            separators=[
-                # Headers (preserve hierarchy)
-                "\n# ", "\n## ", "\n### ", "\n#### ", "\n##### ", "\n###### ",
-                # Code blocks (preserve complete blocks)
-                "\n```", "\n````",
-                # Lists
-                "\n- ", "\n* ", "\n+ ",
-                "\n1. ", "\n2. ", "\n3. ", "\n4. ", "\n5. ",
-                # Paragraphs
-                "\n\n",
-                # Lines
-                "\n",
-                # Words (fallback)
-                " "
-            ]
+            keep_separator=True
         )
     
     def chunk_document(self, document: Document) -> List[Document]:
@@ -124,7 +108,6 @@ class MarkdownChunker(BaseChunker):
             'description': 'Uses LangChain\'s MarkdownTextSplitter for intelligent markdown chunking',
             'preserves_structure': True,
             'handles_diagrams': True,
-            'separators': self.markdown_splitter.separators[:5],  # Show first 5 separators
             'chunk_size': self.max_chunk_size,
             'chunk_overlap': self.chunk_overlap
         }
