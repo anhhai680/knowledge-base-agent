@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 import asyncio
 from typing import Dict, Any, List, Optional
+import os
 
 from .models import (
     QueryRequest, QueryResponse, IndexRequest, IndexResponse, 
@@ -133,6 +134,18 @@ async def initialize_components():
     print("STARTUP DEBUG: Starting Knowledge Base Agent API...")
     logger.info("Starting Knowledge Base Agent API...")
     
+    # Debug LangGraph configuration
+    logger.info(f"LangGraph Configuration - enable_langgraph: {settings.enable_langgraph}")
+    logger.info(f"LangGraph Configuration - default_system: {settings.langgraph_default_system}")
+    logger.info(f"LangGraph Configuration - migration_rollout: {settings.langgraph_migration_rollout}")
+    logger.info(f"LangGraph Configuration - enable_ab_testing: {settings.langgraph_enable_ab_testing}")
+    
+    # Debug environment variables
+    logger.info(f"Environment ENABLE_LANGGRAPH: {os.getenv('ENABLE_LANGGRAPH', 'NOT_SET')}")
+    logger.info(f"Environment LANGGRAPH_DEFAULT_SYSTEM: {os.getenv('LANGGRAPH_DEFAULT_SYSTEM', 'NOT_SET')}")
+    logger.info(f"Environment LANGGRAPH_MIGRATION_ROLLOUT: {os.getenv('LANGGRAPH_MIGRATION_ROLLOUT', 'NOT_SET')}")
+    logger.info(f"Environment LANGGRAPH_ENABLE_AB_TESTING: {os.getenv('LANGGRAPH_ENABLE_AB_TESTING', 'NOT_SET')}")
+    
     try:
         # Validate configuration first
         from ..config.model_config import ModelConfiguration
@@ -222,13 +235,69 @@ async def initialize_components():
         logger.info("Initializing RAG agent...")
         rag_agent = RAGAgent(llm, vector_store)
         
+        # Initialize LangGraph RAG agent if enabled
+        langgraph_rag_agent = None
+        if settings.enable_langgraph:
+            logger.info("LangGraph is enabled, initializing LangGraph RAG agent...")
+            try:
+                from ..agents.langgraph_rag_agent import LangGraphRAGAgent
+                from ..config.graph_config import GraphConfig, SystemSelector
+                
+                # Create LangGraph configuration
+                graph_config = GraphConfig(
+                    enable_langgraph=True,
+                    default_system=SystemSelector.LANGGRAPH if settings.langgraph_default_system == "langgraph" else SystemSelector.AUTO,
+                    migration_rollout_percentage=settings.langgraph_migration_rollout,
+                    enable_ab_testing=settings.langgraph_enable_ab_testing
+                )
+                
+                logger.info(f"Created LangGraph config: enable_langgraph={graph_config.enable_langgraph}, "
+                           f"default_system={graph_config.default_system.value}, "
+                           f"migration_rollout={graph_config.migration_rollout_percentage}")
+                
+                langgraph_rag_agent = LangGraphRAGAgent(
+                    llm=llm,
+                    vectorstore=vector_store,
+                    config=graph_config
+                )
+                logger.info("LangGraph RAG agent initialized successfully")
+                
+            except Exception as e:
+                logger.error(f"Failed to initialize LangGraph RAG agent: {e}")
+                logger.warning("Continuing with LangChain-only system")
+                langgraph_rag_agent = None
+        
         # Initialize diagram handler and agent router
         logger.info("Initializing diagram handler and agent router...")
         from ..processors.diagram_handler import DiagramHandler
         from ..agents.agent_router import AgentRouter
         
         diagram_handler = DiagramHandler(vector_store, llm)
-        agent_router = AgentRouter(rag_agent, diagram_handler)
+        
+        # Create configuration for AgentRouter
+        router_config = None
+        if settings.enable_langgraph:
+            try:
+                from ..config.graph_config import GraphConfig, SystemSelector
+                router_config = GraphConfig(
+                    enable_langgraph=True,
+                    default_system=SystemSelector.LANGGRAPH if settings.langgraph_default_system == "langgraph" else SystemSelector.AUTO,
+                    migration_rollout_percentage=settings.langgraph_migration_rollout,
+                    enable_ab_testing=settings.langgraph_enable_ab_testing
+                )
+                logger.info(f"Created router config: enable_langgraph={router_config.enable_langgraph}, "
+                           f"default_system={router_config.default_system.value}, "
+                           f"migration_rollout={router_config.migration_rollout_percentage}")
+            except Exception as e:
+                logger.error(f"Failed to create router config: {e}")
+                router_config = None
+        
+        agent_router = AgentRouter(
+            rag_agent=rag_agent, 
+            diagram_handler=diagram_handler,
+            langgraph_rag_agent=langgraph_rag_agent,
+            config=router_config
+        )
         
         # Initialize other components
         logger.info("Initializing other components...")
@@ -480,6 +549,25 @@ async def health_check():
         components["github_loader"] = "healthy" if github_loader else "not_initialized"
         components["text_processor"] = "healthy" if text_processor else "not_initialized"
         
+        # Check LangGraph status
+        if agent_router and hasattr(agent_router, 'langgraph_rag_agent'):
+            if agent_router.langgraph_rag_agent:
+                components["langgraph"] = "healthy"
+                # Add LangGraph configuration info as a formatted string
+                if hasattr(agent_router, 'config'):
+                    config = agent_router.config
+                    langgraph_config_str = (
+                        f"enabled:true,"
+                        f"default_system:{config.default_system.value if hasattr(config, 'default_system') else 'unknown'},"
+                        f"migration_rollout:{config.migration_rollout_percentage if hasattr(config, 'migration_rollout_percentage') else 0.0}"
+                    )
+                    components["langgraph_config"] = langgraph_config_str
+                    logger.debug(f"LangGraph config string: {langgraph_config_str}")
+            else:
+                components["langgraph"] = "disabled"
+        else:
+            components["langgraph"] = "not_initialized"
+        
         # Check configuration
         try:
             llm_config = ModelConfiguration.validate_llm_config()
@@ -490,6 +578,12 @@ async def health_check():
                 components["configuration"] = "invalid"
         except Exception as e:
             components["configuration"] = f"error: {str(e)}"
+        
+        # Debug: Log all component values to ensure they're strings
+        logger.debug(f"Health check components: {components}")
+        for key, value in components.items():
+            if not isinstance(value, str):
+                logger.warning(f"Non-string component value: {key} = {value} (type: {type(value)})")
         
         return HealthResponse(
             status="healthy",
@@ -503,7 +597,7 @@ async def health_check():
             status="unhealthy",
             timestamp=datetime.now().isoformat(),
             version="1.0.0",
-            components={"error": str(e)}
+            components={"error": f"health_check_failed: {str(e)}"}
         )
 
 @app.get("/")
@@ -556,4 +650,89 @@ async def validate_config():
         }
     except Exception as e:
         logger.error(f"Error validating configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/langgraph/status")
+async def get_langgraph_status():
+    """Get LangGraph system status and configuration"""
+    try:
+        if not agent_router:
+            return {
+                "status": "not_initialized",
+                "message": "Agent router not initialized",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Get basic status
+        status_info = {
+            "status": "unknown",
+            "timestamp": datetime.now().isoformat(),
+            "configuration": {},
+            "routing_stats": {},
+            "workflow_info": {}
+        }
+        
+        # Check if LangGraph is available
+        if hasattr(agent_router, 'langgraph_rag_agent') and agent_router.langgraph_rag_agent:
+            status_info["status"] = "active"
+            status_info["message"] = "LangGraph system is active and available"
+            
+            # Add configuration details
+            if hasattr(agent_router, 'config'):
+                config = agent_router.config
+                status_info["configuration"] = {
+                    "enable_langgraph": config.enable_langgraph,
+                    "default_system": config.default_system.value if hasattr(config, 'default_system') else "unknown",
+                    "migration_rollout_percentage": config.migration_rollout_percentage if hasattr(config, 'migration_rollout_percentage') else 0.0,
+                    "enable_ab_testing": config.enable_ab_testing if hasattr(config, 'enable_ab_testing') else False,
+                    "enable_parallel_processing": config.enable_parallel_processing if hasattr(config, 'enable_parallel_processing') else False
+                }
+            
+            # Add routing statistics
+            if hasattr(agent_router, 'get_routing_stats'):
+                status_info["routing_stats"] = agent_router.get_routing_stats()
+            
+            # Add workflow information if available
+            if hasattr(agent_router.langgraph_rag_agent, 'get_performance_metrics'):
+                try:
+                    status_info["workflow_info"] = agent_router.langgraph_rag_agent.get_performance_metrics()
+                except Exception as e:
+                    status_info["workflow_info"] = {"error": str(e)}
+            
+        else:
+            status_info["status"] = "disabled"
+            status_info["message"] = "LangGraph system is not available"
+            
+            # Check if it's due to configuration
+            if hasattr(agent_router, 'config'):
+                config = agent_router.config
+                status_info["configuration"] = {
+                    "enable_langgraph": config.enable_langgraph if hasattr(config, 'enable_langgraph') else False,
+                    "default_system": config.default_system.value if hasattr(config, 'default_system') else "unknown"
+                }
+        
+        return status_info
+        
+    except Exception as e:
+        logger.error(f"Error getting LangGraph status: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"Error retrieving status: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+@app.get("/langgraph/routing-stats")
+async def get_langgraph_routing_stats():
+    """Get LangGraph routing statistics"""
+    try:
+        if not agent_router:
+            raise HTTPException(status_code=500, detail="Agent router not initialized")
+        
+        if hasattr(agent_router, 'get_routing_stats'):
+            return agent_router.get_routing_stats()
+        else:
+            return {"error": "Routing statistics not available"}
+            
+    except Exception as e:
+        logger.error(f"Error getting routing stats: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
