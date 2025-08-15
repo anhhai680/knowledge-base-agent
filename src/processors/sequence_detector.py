@@ -4,7 +4,7 @@ Sequence Detector for analyzing code patterns to generate sequence diagrams.
 
 import ast
 import re
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -165,6 +165,20 @@ class SequenceDetector:
         """Analyze markdown documentation for API and service interactions"""
         interactions = []
         
+        # First, check if there are existing sequence diagrams in the content
+        existing_diagrams = self._extract_existing_sequence_diagrams(content)
+        if existing_diagrams:
+            # If we found existing diagrams, prioritize them
+            for diagram in existing_diagrams:
+                interactions.append({
+                    'caller': 'Documentation',
+                    'callee': 'Existing Diagram',
+                    'method': diagram['title'],
+                    'type': 'existing_sequence_diagram',
+                    'relevance': 'high',
+                    'diagram_content': diagram['content']
+                })
+        
         # Look for API endpoint patterns
         api_patterns = [
             # REST API calls: curl -X POST http://localhost:5033/Car
@@ -237,6 +251,201 @@ class SequenceDetector:
             'language': 'markdown',
             'interactions': interactions
         }
+    
+    def _extract_existing_sequence_diagrams(self, content: str) -> List[Dict]:
+        """Extract existing sequence diagrams from markdown content"""
+        diagrams = []
+        
+        # Look for Mermaid sequence diagrams with both 3 and 4 backticks
+        mermaid_patterns = [
+            r'```mermaid\s*\n(sequenceDiagram[^`]*)\n```',  # 3 backticks
+            r'````mermaid\s*\n(sequenceDiagram[^`]*)\n````',  # 4 backticks
+            r'```mermaid\s*\n(sequenceDiagram[^`]*)\n````',  # 3 opening, 4 closing
+            r'````mermaid\s*\n(sequenceDiagram[^`]*)\n```',  # 4 opening, 3 closing
+        ]
+        
+        for pattern in mermaid_patterns:
+            mermaid_matches = re.finditer(pattern, content, re.DOTALL | re.IGNORECASE)
+            for match in mermaid_matches:
+                diagram_content = match.group(1).strip()
+                
+                # Extract title from surrounding context
+                title = self._extract_diagram_title(content, match.start())
+                
+                diagrams.append({
+                    'title': title or 'Sequence Diagram',
+                    'content': diagram_content,
+                    'type': 'mermaid'
+                })
+        
+        # Look for partial sequence diagrams (start markers without end markers)
+        partial_patterns = [
+            r'```mermaid\s*\n(sequenceDiagram[^`]*)',  # Start of sequence diagram
+            r'````mermaid\s*\n(sequenceDiagram[^`]*)',  # Start of sequence diagram with 4 backticks
+        ]
+        
+        for pattern in partial_patterns:
+            matches = re.finditer(pattern, content, re.DOTALL | re.IGNORECASE)
+            for match in matches:
+                diagram_content = match.group(1).strip()
+                
+                # Extract title from surrounding context
+                title = self._extract_diagram_title(content, match.start())
+                
+                diagrams.append({
+                    'title': title or 'Partial Sequence Diagram',
+                    'content': diagram_content,
+                    'type': 'partial_mermaid'
+                })
+        
+        # Look for sequence diagram descriptions in text format
+        sequence_patterns = [
+            r'(?:sequence|flow|interaction)\s+diagram[:\s]*([^.\n]+)',
+            r'(?:shows?|displays?|illustrates?)\s+(?:the\s+)?(?:sequence|flow|interaction)\s+([^.\n]+)',
+        ]
+        
+        for pattern in sequence_patterns:
+            matches = re.finditer(pattern, content, re.IGNORECASE)
+            for match in matches:
+                description = match.group(1).strip()
+                if description and len(description) > 10:  # Filter out very short descriptions
+                    diagrams.append({
+                        'title': f'Sequence Diagram: {description}',
+                        'content': description,
+                        'type': 'text_description'
+                    })
+        
+        return diagrams
+    
+    def reconstruct_sequence_diagram_from_chunks(self, chunks: List[str]) -> Optional[str]:
+        """Reconstruct a complete sequence diagram from multiple chunks"""
+        # Look for the start of a sequence diagram
+        start_markers = ['```mermaid', '````mermaid']
+        end_markers = ['```', '````']
+        
+        # Find the chunk that contains the start of a sequence diagram
+        start_chunk_idx = None
+        start_marker = None
+        
+        for i, chunk in enumerate(chunks):
+            for marker in start_markers:
+                if marker in chunk and 'sequenceDiagram' in chunk:
+                    start_chunk_idx = i
+                    start_marker = marker
+                    break
+            if start_chunk_idx is not None:
+                break
+        
+        if start_chunk_idx is None:
+            return None
+        
+        # Find the chunk that contains the end marker
+        end_chunk_idx = None
+        end_marker = None
+        
+        # Look for the end marker in subsequent chunks
+        for i in range(start_chunk_idx, len(chunks)):
+            chunk = chunks[i]
+            for marker in end_markers:
+                if marker in chunk:
+                    # Check if this marker is likely the end of our sequence diagram
+                    # Look for content that suggests it's the end of a sequence diagram
+                    chunk_before_marker = chunk[:chunk.find(marker)]
+                    if ('participant' in chunk_before_marker or 
+                        'Note over' in chunk_before_marker or
+                        '->>' in chunk_before_marker or
+                        '-->>' in chunk_before_marker):
+                        end_chunk_idx = i
+                        end_marker = marker
+                        break
+            if end_chunk_idx is not None:
+                break
+        
+        # If we can't find a clear end marker, try to reconstruct from what we have
+        if end_chunk_idx is None:
+            # Look for the last chunk that contains sequence diagram content
+            for i in range(start_chunk_idx, len(chunks)):
+                chunk = chunks[i]
+                if ('participant' in chunk or 
+                    'Note over' in chunk or
+                    '->>' in chunk or
+                    '-->>' in chunk):
+                    end_chunk_idx = i
+                    end_marker = None  # No clear end marker found
+                    break
+        
+        # If we still can't find an end marker, use the last chunk as the end
+        if end_chunk_idx is None:
+            end_chunk_idx = len(chunks) - 1  # Use the last chunk
+        
+        # Reconstruct the complete diagram
+        reconstructed_content = ""
+        
+        # Add content from start chunk (from the start marker)
+        start_chunk = chunks[start_chunk_idx]
+        start_marker_pos = start_chunk.find(start_marker)
+        if start_marker_pos != -1:
+            # Find the newline after the start marker
+            newline_pos = start_chunk.find('\n', start_marker_pos)
+            if newline_pos != -1:
+                reconstructed_content = start_chunk[newline_pos + 1:]
+        
+        # Add content from middle chunks
+        for i in range(start_chunk_idx + 1, end_chunk_idx):
+            reconstructed_content += chunks[i]
+        
+        # Add content from end chunk (up to the end marker if found)
+        end_chunk = chunks[end_chunk_idx]
+        if end_marker and end_marker in end_chunk:
+            end_marker_pos = end_chunk.find(end_marker)
+            if end_marker_pos != -1:
+                reconstructed_content += end_chunk[:end_marker_pos]
+        else:
+            # Add the entire end chunk if no end marker found
+            reconstructed_content += end_chunk
+        
+        # Clean up the reconstructed content
+        reconstructed_content = reconstructed_content.strip()
+        
+        # Validate that we have a proper sequence diagram
+        if ('sequenceDiagram' in reconstructed_content and 
+            'participant' in reconstructed_content and
+            len(reconstructed_content) > 100):  # Ensure we have substantial content
+            return reconstructed_content
+        
+        return None
+    
+    def _extract_diagram_title(self, content: str, diagram_start: int) -> str:
+        """Extract a meaningful title for a diagram from surrounding context"""
+        # Look for headers above the diagram
+        lines_before = content[:diagram_start].split('\n')
+        
+        for line in reversed(lines_before[-10:]):  # Check last 10 lines before diagram
+            line = line.strip()
+            # Look for markdown headers
+            if line.startswith('#'):
+                # Remove markdown header markers and return the title
+                title = re.sub(r'^#+\s*', '', line)
+                if title and len(title) > 3:
+                    return title
+            # Look for bold text that might be a title
+            elif line.startswith('**') and line.endswith('**'):
+                title = line[2:-2]  # Remove ** markers
+                if title and len(title) > 3:
+                    return title
+        
+        # If no clear title found, look for context around the diagram
+        context_lines = content[diagram_start:diagram_start + 200].split('\n')
+        for line in context_lines[:5]:  # Check first 5 lines after diagram start
+            line = line.strip()
+            if line and not line.startswith('```') and len(line) > 10:
+                # Clean up the line to make it a reasonable title
+                title = re.sub(r'[^\w\s-]', '', line)  # Remove special characters
+                title = ' '.join(title.split())  # Normalize whitespace
+                if title and len(title) > 5 and len(title) < 100:
+                    return title
+        
+        return 'Sequence Diagram'
     
     def _extract_service_name_from_content(self, content: str) -> Optional[str]:
         """Extract the primary service name from documentation content"""

@@ -6,7 +6,7 @@ import chromadb
 import os
 import shutil
 from .base_store import BaseVectorStore
-from ..llm.embedding_factory import get_embedding_function
+from ..llm.embedding_factory import get_embedding_function, MultiModelEmbeddingWrapper
 from ..config.model_config import ModelConfiguration
 from ..utils.logging import get_logger
 
@@ -26,12 +26,51 @@ class ChromaStore(BaseVectorStore):
         self.port = port
         self.persist_directory = persist_directory
         
-        # Set up embedding function
-        self.embedding_function = embedding_function or get_embedding_function()
+        # Set up default embedding function (for backward compatibility)
+        self.default_embedding_function = embedding_function or get_embedding_function()
+        
+        # Check if file-type-aware embeddings are enabled
+        from ..config.settings import settings
+        if settings.use_file_type_aware_embeddings:
+            # Create multi-model wrapper for file-type-aware embeddings
+            self.embedding_function = MultiModelEmbeddingWrapper(self.default_embedding_function)
+            logger.info("File-type-aware embeddings enabled")
+        else:
+            # Use default embedding function
+            self.embedding_function = self.default_embedding_function
+            logger.info("File-type-aware embeddings disabled, using default")
         
         # Initialize Chroma with dimension compatibility checking
         self._initialize_chroma_with_compatibility_check()
-        
+    
+    def _get_embedding_for_document(self, document: Document) -> Any:
+        """Get the appropriate embedding function for a specific document based on file type"""
+        try:
+            # Extract file type from document metadata
+            file_path = document.metadata.get('file_path', '')
+            file_type = None
+            
+            if file_path:
+                # Extract file extension
+                if '.' in file_path:
+                    file_type = '.' + file_path.split('.')[-1]
+                else:
+                    # Check if it's a markdown file without extension
+                    if 'README' in file_path or 'readme' in file_path:
+                        file_type = '.md'
+            
+            # If we have a file type, create a file-type-aware embedding
+            if file_type:
+                logger.debug(f"Creating file-type-aware embedding for {file_type}")
+                return get_embedding_function(file_type=file_type)
+            
+            # Fallback to default embedding
+            return self.default_embedding_function
+            
+        except Exception as e:
+            logger.warning(f"Failed to create file-type-aware embedding: {e}, using default")
+            return self.default_embedding_function
+    
     def _initialize_chroma_with_compatibility_check(self):
         """Initialize Chroma with dimension compatibility checking"""
         try:

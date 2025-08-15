@@ -103,8 +103,8 @@ class ChunkingConfigManager:
                 include_docstrings=True
             ),
             '.md': ChunkingStrategyConfig(
-                max_chunk_size=2000,
-                chunk_overlap=100,
+                max_chunk_size=6000,  # Increased from 4000 since MarkdownTextSplitter handles large chunks better
+                chunk_overlap=400,     # Increased from 200 for better context preservation
                 preserve_methods=False,
                 preserve_classes=False,
                 include_imports=False,
