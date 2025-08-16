@@ -1,10 +1,14 @@
 """
 AgentRouter - Routes queries to appropriate specialized agents with enhanced pattern detection
+
+Enhanced to support routing between LangChain and LangGraph systems for zero-downtime migration.
 """
 
 import re
-from typing import Dict, Any, List
+import random
+from typing import Dict, Any, List, Optional
 from ..utils.logging import get_logger
+from ..config.graph_config import GraphConfig, SystemSelector, DEFAULT_GRAPH_CONFIG
 
 logger = get_logger(__name__)
 
@@ -12,14 +16,40 @@ logger = get_logger(__name__)
 class AgentRouter:
     """Routes queries to appropriate specialized agents with enhanced pattern detection"""
     
-    def __init__(self, rag_agent, diagram_handler):
+    def __init__(self, 
+                 rag_agent, 
+                 diagram_handler,
+                 langgraph_rag_agent: Optional[Any] = None,
+                 config: Optional[GraphConfig] = None):
+        # Original agents (LangChain-based)
         self.rag_agent = rag_agent
         self.diagram_handler = diagram_handler
+        
+        # New LangGraph agents (parallel system)
+        self.langgraph_rag_agent = langgraph_rag_agent
+        self.config = config or DEFAULT_GRAPH_CONFIG
+        
         # Pre-compile regex patterns for better performance
         self._diagram_patterns = self._compile_diagram_patterns()
+        
+        # Migration tracking
+        self.routing_stats = {
+            "langchain_requests": 0,
+            "langgraph_requests": 0,
+            "total_requests": 0,
+            "system_selection_overrides": 0
+        }
+        
+        logger.info(f"AgentRouter initialized with LangGraph support: {self.config.enable_langgraph}")
+        if self.config.enable_langgraph:
+            logger.info(f"Default system: {self.config.default_system.value}, "
+                       f"Migration rollout: {self.config.migration_rollout_percentage * 100:.1f}%")
     
-    def route_query(self, question: str) -> Dict[str, Any]:
+    def route_query(self, question: str, force_system: Optional[str] = None) -> Dict[str, Any]:
         """Route query to appropriate agent based on content analysis"""
+        
+        # Increment total request counter
+        self.routing_stats["total_requests"] += 1
         
         # Check for repository information requests
         if self._is_repository_info_request(question):
@@ -31,9 +61,157 @@ class AgentRouter:
             logger.info(f"Routing to diagram generation: {question[:100]}...")
             return self._generate_diagram_response(question)
         
-        # Default to RAG agent for regular queries
+        # Route to RAG agent - with system selection
         logger.info(f"Routing to RAG agent: {question[:100]}...")
-        return self.rag_agent.query(question)
+        return self._route_to_rag_agent(question, force_system)
+    
+    def _route_to_rag_agent(self, question: str, force_system: Optional[str] = None) -> Dict[str, Any]:
+        """Route to appropriate RAG agent (LangChain vs LangGraph)"""
+        
+        # Determine which system to use
+        selected_system = self._select_system(force_system)
+        
+        try:
+            if selected_system == SystemSelector.LANGGRAPH:
+                if self.langgraph_rag_agent is None:
+                    logger.warning("LangGraph agent not available, falling back to LangChain")
+                    selected_system = SystemSelector.LANGCHAIN
+                else:
+                    self.routing_stats["langgraph_requests"] += 1
+                    logger.info(f"Using LangGraph RAG agent for query")
+                    result = self.langgraph_rag_agent.query(question)
+                    
+                    # Add system identification to metadata
+                    if "metadata" not in result:
+                        result["metadata"] = {}
+                    result["metadata"]["processing_system"] = "langgraph"
+                    result["metadata"]["system_selection_reason"] = self._get_selection_reason(force_system)
+                    
+                    return result
+            
+            # Default to LangChain system
+            self.routing_stats["langchain_requests"] += 1
+            logger.info(f"Using LangChain RAG agent for query")
+            result = self.rag_agent.query(question)
+            
+            # Add system identification to metadata
+            if "metadata" not in result:
+                result["metadata"] = {}
+            result["metadata"]["processing_system"] = "langchain"
+            result["metadata"]["system_selection_reason"] = self._get_selection_reason(force_system)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in RAG agent routing: {e}")
+            
+            # Fallback mechanism
+            if selected_system == SystemSelector.LANGGRAPH:
+                logger.info("LangGraph failed, falling back to LangChain")
+                try:
+                    self.routing_stats["langchain_requests"] += 1
+                    result = self.rag_agent.query(question)
+                    
+                    if "metadata" not in result:
+                        result["metadata"] = {}
+                    result["metadata"]["processing_system"] = "langchain"
+                    result["metadata"]["system_selection_reason"] = "langgraph_fallback"
+                    result["metadata"]["fallback_error"] = str(e)
+                    
+                    return result
+                except Exception as fallback_error:
+                    logger.error(f"Fallback also failed: {fallback_error}")
+            
+            # Final error response
+            return {
+                "answer": f"I apologize, but I encountered an error processing your request: {str(e)}",
+                "source_documents": [],
+                "metadata": {
+                    "error": str(e),
+                    "processing_system": "error",
+                    "attempted_system": selected_system.value if isinstance(selected_system, SystemSelector) else str(selected_system)
+                }
+            }
+    
+    def _select_system(self, force_system: Optional[str] = None) -> SystemSelector:
+        """Select which system to use for processing"""
+        
+        # Handle forced system selection
+        if force_system:
+            self.routing_stats["system_selection_overrides"] += 1
+            if force_system.lower() == "langgraph":
+                return SystemSelector.LANGGRAPH
+            elif force_system.lower() == "langchain":
+                return SystemSelector.LANGCHAIN
+        
+        # If LangGraph is not enabled, always use LangChain
+        if not self.config.enable_langgraph:
+            return SystemSelector.LANGCHAIN
+        
+        # Handle different selection strategies
+        if self.config.default_system == SystemSelector.LANGGRAPH:
+            return SystemSelector.LANGGRAPH
+        elif self.config.default_system == SystemSelector.LANGCHAIN:
+            return SystemSelector.LANGCHAIN
+        elif self.config.default_system == SystemSelector.AUTO:
+            # Auto selection based on rollout percentage
+            if self.config.enable_ab_testing:
+                # A/B testing - randomly route based on rollout percentage
+                if random.random() < self.config.migration_rollout_percentage:
+                    return SystemSelector.LANGGRAPH
+                else:
+                    return SystemSelector.LANGCHAIN
+            else:
+                # Gradual rollout - use percentage for migration
+                if random.random() < self.config.migration_rollout_percentage:
+                    return SystemSelector.LANGGRAPH
+                else:
+                    return SystemSelector.LANGCHAIN
+        
+        # Default fallback
+        return SystemSelector.LANGCHAIN
+    
+    def _get_selection_reason(self, force_system: Optional[str] = None) -> str:
+        """Get reason for system selection"""
+        if force_system:
+            return f"forced_{force_system.lower()}"
+        elif not self.config.enable_langgraph:
+            return "langgraph_disabled"
+        elif self.config.default_system != SystemSelector.AUTO:
+            return f"default_{self.config.default_system.value}"
+        elif self.config.enable_ab_testing:
+            return "ab_testing"
+        else:
+            return "gradual_rollout"
+    
+    def get_routing_stats(self) -> Dict[str, Any]:
+        """Get routing statistics"""
+        stats = self.routing_stats.copy()
+        
+        if stats["total_requests"] > 0:
+            stats["langchain_percentage"] = (stats["langchain_requests"] / stats["total_requests"]) * 100
+            stats["langgraph_percentage"] = (stats["langgraph_requests"] / stats["total_requests"]) * 100
+        else:
+            stats["langchain_percentage"] = 0.0
+            stats["langgraph_percentage"] = 0.0
+        
+        stats["config"] = {
+            "enable_langgraph": self.config.enable_langgraph,
+            "default_system": self.config.default_system.value,
+            "migration_rollout_percentage": self.config.migration_rollout_percentage,
+            "enable_ab_testing": self.config.enable_ab_testing
+        }
+        
+        return stats
+    
+    def reset_routing_stats(self):
+        """Reset routing statistics"""
+        self.routing_stats = {
+            "langchain_requests": 0,
+            "langgraph_requests": 0,
+            "total_requests": 0,
+            "system_selection_overrides": 0
+        }
     
     def _compile_diagram_patterns(self) -> List[re.Pattern]:
         """Pre-compile regex patterns for diagram detection"""

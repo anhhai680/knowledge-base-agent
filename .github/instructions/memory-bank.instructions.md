@@ -275,7 +275,7 @@ For existing tasks, the command **update task [ID]** will prompt me to:
 1. Open the specific task file 
 2. Add a new progress log entry with today's date
 3. Update the task status if needed
-4. Update the _index.md file to reflect any status changes
+4. Update the task-list.md file to reflect any status changes
 5. Integrate any new decisions into the thought process
 
 To view tasks, the command **show tasks [filter]** will:

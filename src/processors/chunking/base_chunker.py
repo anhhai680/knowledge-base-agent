@@ -166,6 +166,13 @@ class BaseChunker(ABC):
         if not content:
             return ""
         
+        # Log content details for debugging
+        from ...utils.logging import get_logger
+        logger = get_logger(__name__)
+        
+        original_length = len(content)
+        logger.info(f"Cleaning content: original length={original_length}")
+        
         # Remove null bytes and normalize line endings
         content = content.replace('\x00', '')
         content = content.replace('\r\n', '\n')
@@ -175,7 +182,14 @@ class BaseChunker(ABC):
         lines = content.split('\n')
         cleaned_lines = [line.rstrip() for line in lines]
         
-        return '\n'.join(cleaned_lines).strip()
+        cleaned_content = '\n'.join(cleaned_lines).strip()
+        cleaned_length = len(cleaned_content)
+        
+        logger.info(f"Content cleaned: {original_length} -> {cleaned_length} chars")
+        if cleaned_length < original_length * 0.8:  # If we lost more than 20% of content
+            logger.warning(f"Significant content loss during cleaning: {original_length} -> {cleaned_length} chars")
+        
+        return cleaned_content
     
     def _split_oversized_chunk(self, content: str, metadata: ChunkMetadata) -> List[str]:
         """

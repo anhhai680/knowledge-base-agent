@@ -1,0 +1,18 @@
+# LangGraph Framework Dependencies
+# These will be merged into main requirements.txt during migration
+
+# Core LangGraph Framework
+langgraph>=0.2.0
+langgraph-checkpoint>=0.2.0
+
+# Enhanced Monitoring and Observability  
+langsmith>=0.2.0
+structlog>=23.2.0
+
+# Performance and Reliability
+asyncio-throttle>=1.0.0
+tenacity>=8.2.0
+
+# Additional utilities for workflow management
+psutil>=5.9.0  # Already in main requirements
+aiofiles>=23.2.0  # Already in main requirements
