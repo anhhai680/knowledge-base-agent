@@ -48,7 +48,7 @@ class LLMFactory:
         """Get configuration from settings"""
         return {
             "model": settings.llm_model,
-            "api_base_url": settings.llm_api_base_url,
+            "base_url": settings.llm_api_base_url,
             "openai_api_key": settings.openai_api_key,
             "gemini_api_key": settings.gemini_api_key,
             "azure_openai_api_key": settings.azure_openai_api_key,
@@ -64,6 +64,7 @@ class LLMFactory:
             raise ValueError("OpenAI API key is required")
         
         llm_wrapper = OpenAILLM(
+            base_url=config.get("base_url", "https://api.openai.com/v1"),
             api_key=config["openai_api_key"],
             model=config.get("model", "gpt-3.5-turbo"),
             temperature=config.get("temperature", 0.7),

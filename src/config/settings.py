@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # Embedding Configuration
     embedding_model: str = "text-embedding-ada-002"  # Embedding model name
     embedding_api_base_url: Optional[str] = None  # Base URL for embedding API
+    embedding_api_key: Optional[str] = None
     
     # API Keys
     openai_api_key: Optional[str] = None
