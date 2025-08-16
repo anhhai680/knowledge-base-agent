@@ -110,7 +110,7 @@ async def restore_indexed_repositories():
                     # Try to extract additional metadata from the first document
                     branch = "main"  # Default branch
                     last_indexed = datetime.now().isoformat()  # Default to now
-                    original_files_count = len(repo_docs)  # Default to chunk count for backward compatibility
+                    original_files_count = len(repo_docs)  # Fallback to chunk count if original file count is unavailable
                     
                     if repo_docs and metadatas:
                         first_doc_meta = metadatas[repo_docs[0]]
