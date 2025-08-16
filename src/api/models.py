@@ -35,7 +35,6 @@ class RepositoryInfo(BaseModel):
     branch: Optional[str] = "main"
     status: str
     documents_count: int = 0
-    document_count: Optional[int] = None  # For backward compatibility
     last_indexed: Optional[str] = None
     error: Optional[str] = None
 

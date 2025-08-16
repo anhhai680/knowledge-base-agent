@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     
+    # LangGraph Settings
+    enable_langgraph: bool = False
+    
     @validator('llm_provider', 'llm_model', 'embedding_model', pre=True)
     def strip_comments(cls, v):
         """Strip inline comments from string values"""

@@ -107,11 +107,25 @@ async def restore_indexed_repositories():
                     repo_docs = [i for i, meta in enumerate(metadatas) 
                                if meta and meta.get("repository") == repo_url] if metadatas else []
                     
+                    # Try to extract additional metadata from the first document
+                    branch = "main"  # Default branch
+                    last_indexed = datetime.now().isoformat()  # Default to now
+                    
+                    if repo_docs and metadatas:
+                        first_doc_meta = metadatas[repo_docs[0]]
+                        if first_doc_meta:
+                            branch = first_doc_meta.get("branch", "main")
+                            last_indexed = first_doc_meta.get("indexed_at", datetime.now().isoformat())
+                    
                     indexed_repositories[repo_id] = RepositoryInfo(
+                        id=repo_id,
                         url=repo_url,
+                        name=repo_id,
+                        description=f"Repository: {repo_url}",
+                        branch=branch,
                         status="indexed",
                         documents_count=len(repo_docs),
-                        last_indexed=datetime.now().isoformat(),
+                        last_indexed=last_indexed,
                         error=None
                     )
                     
