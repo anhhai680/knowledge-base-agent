@@ -418,7 +418,6 @@ async def index_single_repository_task(repo_url: str, branch: str = "main", file
         
         # Update repository info
         indexed_repositories[repo_name].documents_count = len(processed_docs)
-        indexed_repositories[repo_name].document_count = len(processed_docs)  # Backward compatibility
         indexed_repositories[repo_name].status = "indexed"
         indexed_repositories[repo_name].last_indexed = datetime.now().isoformat()
         
