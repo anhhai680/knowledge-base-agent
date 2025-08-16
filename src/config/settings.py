@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     github_branch: List[str] = ["main", "master"]
     github_supported_file_extensions: List[str] = [
         ".cs", ".py", ".sh", ".js", ".jsx", ".ts", ".tsx", ".md", 
-        ".txt", ".json", ".yml", ".yaml"
+        ".txt", ".json", ".yml", ".yaml", ".xml", ".html", ".css", 
+        ".scss", ".sql", ".dockerfile", ".gitignore", ".env", ".config"
     ]
     
     # Processing Settings
@@ -67,6 +68,9 @@ class Settings(BaseSettings):
     # Application Settings
     app_env: str = "development"
     log_level: str = "INFO"
+    
+    # LangGraph Settings
+    enable_langgraph: bool = False
     
     @validator('llm_provider', 'llm_model', 'embedding_model', pre=True)
     def strip_comments(cls, v):

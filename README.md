@@ -10,6 +10,7 @@ An AI-powered knowledge base agent that can index GitHub repositories and answer
 - **Multiple Embedding Models**: Support for OpenAI, Gemini, Ollama, and HuggingFace embeddings
 - **Easy Model Switching**: Simple configuration system for changing models
 - **Vector Search**: Uses Chroma for efficient semantic search
+- **Accurate Document Counting**: Tracks both original files and processed chunks separately
 - **REST API**: Full-featured API for integration
 - **Web UI**: Simple web interface for chatting with your code
 
@@ -98,6 +99,21 @@ docker-compose logs -f
 # Stop services (data will persist)
 docker-compose down
 ```
+
+## Document Counting
+
+The system now accurately tracks two different counts for each repository:
+
+- **`original_files_count`**: The actual number of files in the repository (e.g., 50 Python files)
+- **`documents_count`**: The number of chunks created after processing (e.g., 200 chunks)
+
+This distinction is important because:
+- **Files** represent the actual source code structure
+- **Chunks** represent how the content is split for vector search
+- The web interface displays the file count for better user understanding
+- The chunk count is used internally for vector store operations
+
+For example, a repository with 25 source files might be chunked into 120 chunks for optimal search performance.
 
 **Note**: The Chroma data persistence fix ensures that your knowledge base data survives container restarts and rebuilds.
 

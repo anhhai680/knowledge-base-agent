@@ -69,13 +69,13 @@ class GitHubLoader:
         
         # If file_patterns provided, use them; otherwise use supported extensions
         if file_patterns:
-            # Convert patterns to a set of allowed extensions for efficiency
-            pattern_extensions = set()
-            for pattern in file_patterns:
-                if pattern.startswith("*."):
-                    pattern_extensions.add(pattern[1:])  # Remove the "*" prefix
+            # For file_patterns, we'll use fnmatch directly, no need to convert to extensions
+            pattern_extensions = None
         else:
             pattern_extensions = self.supported_extensions
+        
+        total_files_found = 0
+        matched_files = 0
         
         for root, dirs, files in os.walk(directory_path):
             # Skip common directories
@@ -84,6 +84,7 @@ class GitHubLoader:
             }]
             
             for file in files:
+                total_files_found += 1
                 file_path = os.path.join(root, file)
                 relative_path = os.path.relpath(file_path, directory_path)
                 
@@ -103,6 +104,8 @@ class GitHubLoader:
                 
                 if not matches_pattern:
                     continue
+                
+                matched_files += 1
                 
                 # Skip files that are too large (> 1MB)
                 if os.path.getsize(file_path) > 1024 * 1024:
@@ -132,4 +135,5 @@ class GitHubLoader:
                     logger.warning(f"Could not read file {relative_path}: {str(e)}")
                     continue
         
+        logger.info(f"File scanning complete: {total_files_found} total files found, {matched_files} matched patterns, {len(documents)} successfully loaded")
         return documents
