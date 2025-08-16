@@ -5,6 +5,7 @@ An AI-powered knowledge base agent that can index GitHub repositories and answer
 ## Features
 
 - **GitHub Repository Indexing**: Automatically index code from GitHub repositories
+- **Automatic Startup Indexing**: Configure repositories in `.env` to automatically index on startup
 - **Intelligent Q&A**: Ask questions about your codebase and get accurate answers
 - **Multiple LLM Support**: Works with OpenAI GPT, Google Gemini, Azure OpenAI, and Ollama
 - **Multiple Embedding Models**: Support for OpenAI, Gemini, Ollama, and HuggingFace embeddings
@@ -159,6 +160,12 @@ GEMINI_API_KEY=your_gemini_api_key
 
 # Required: GitHub access
 GITHUB_TOKEN=your_github_token
+
+# Optional: Automatic repository indexing
+# You can specify repositories to automatically index on startup
+# Format: JSON array or comma-separated URLs
+GITHUB_REPOS=["https://github.com/user/repo1", "https://github.com/user/repo2"]
+# Alternative: GITHUB_REPOS=https://github.com/user/repo1,https://github.com/user/repo2
 
 # Optional: Vector database (defaults to local Chroma)
 CHROMA_HOST=localhost

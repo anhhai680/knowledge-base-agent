@@ -254,6 +254,53 @@ async def startup_event():
     """Handle startup event"""
     await initialize_components()
     await restore_indexed_repositories()
+    await auto_index_configured_repositories()
+
+async def auto_index_configured_repositories():
+    """Automatically index repositories configured in GITHUB_REPOS environment variable"""
+    global rag_agent, github_loader, text_processor
+    
+    if not rag_agent or not github_loader or not text_processor:
+        logger.warning("Components not initialized, skipping auto-indexing")
+        return
+    
+    if not settings.github_repos:
+        logger.info("No repositories configured in GITHUB_REPOS, skipping auto-indexing")
+        return
+    
+    logger.info(f"Auto-indexing {len(settings.github_repos)} configured repositories...")
+    
+    # Check which repositories are already indexed
+    already_indexed = []
+    to_index = []
+    
+    for repo_url in settings.github_repos:
+        repo_name = repo_url.split("/")[-1]
+        if repo_name in indexed_repositories:
+            already_indexed.append(repo_name)
+            logger.info(f"Repository {repo_name} already indexed, skipping")
+        else:
+            to_index.append(repo_url)
+    
+    if not to_index:
+        logger.info(f"All {len(already_indexed)} configured repositories are already indexed")
+        return
+    
+    logger.info(f"Starting auto-indexing of {len(to_index)} new repositories...")
+    
+    # Start indexing in the background
+    try:
+        # Use the existing indexing task
+        await index_repositories_task(
+            to_index, 
+            settings.github_branch[0] if settings.github_branch else "main",
+            None,  # Use default file patterns
+            "auto_index_startup"
+        )
+        logger.info(f"Successfully completed auto-indexing of {len(to_index)} repositories")
+    except Exception as e:
+        logger.error(f"Error during auto-indexing: {str(e)}")
+        # Don't fail startup, just log the error
 
 @app.post("/query", response_model=QueryResponse)
 async def query_knowledge_base(request: QueryRequest):
