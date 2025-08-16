@@ -513,7 +513,7 @@ async def reindex_repository(repository_id: str):
         logger.info(f"Re-indexing repository: {repo_url}")
         
         # Start re-indexing in background
-        await index_single_repository_task(repo_url, branch)
+        await index_single_repository_task(repo_url, branch, repo_info.file_patterns)
         
         return {
             "message": f"Repository {repository_id} re-indexing started",
