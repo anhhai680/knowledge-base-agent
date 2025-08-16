@@ -363,6 +363,10 @@ async def index_repositories_task(repo_urls: List[str], branch: str = "main", fi
     total_documents = 0
     processed_repos = 0
     
+    # Use comprehensive file patterns if none provided
+    if not file_patterns:
+        file_patterns = [f"*{ext}" for ext in settings.github_supported_file_extensions]
+    
     for repo_url in repo_urls:
         try:
             await index_single_repository_task(repo_url, branch or "main", file_patterns)
@@ -403,10 +407,17 @@ async def index_single_repository_task(repo_url: str, branch: str = "main", file
         if not github_loader:
             raise Exception("GitHub loader not initialized")
             
+        # Convert settings extensions to file patterns
+        default_patterns = [f"*{ext}" for ext in settings.github_supported_file_extensions]
+        
+        # Log the file patterns being used
+        patterns_to_use = file_patterns or default_patterns
+        logger.info(f"Using file patterns: {patterns_to_use}")
+        
         documents = github_loader.load_repository(
             repo_url=repo_url,
             branch=branch,
-            file_patterns=file_patterns or ["*.py", "*.js", "*.ts", "*.md", "*.txt"]
+            file_patterns=patterns_to_use
         )
         
         if not documents:
@@ -414,6 +425,14 @@ async def index_single_repository_task(repo_url: str, branch: str = "main", file
             indexed_repositories[repo_name].error = "No documents found in repository"
             logger.error(f"No documents found in repository: {repo_url}")
             return
+        
+        # Log file type distribution for debugging
+        file_types = {}
+        for doc in documents:
+            file_ext = doc.metadata.get("file_type", "unknown")
+            file_types[file_ext] = file_types.get(file_ext, 0) + 1
+        
+        logger.info(f"File type distribution in {repo_url}: {file_types}")
         
         # Process documents
         if not text_processor:
