@@ -539,7 +539,7 @@ async def reindex_all_repositories():
         # Start re-indexing all repositories in background
         for repo_id, repo_info in indexed_repositories.items():
             try:
-                await index_single_repository_task(repo_info.url, repo_info.branch)
+                await index_single_repository_task(repo_info.url, repo_info.branch, repo_info.file_patterns)
             except Exception as e:
                 logger.error(f"Failed to re-index {repo_id}: {str(e)}")
                 continue
