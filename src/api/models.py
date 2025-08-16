@@ -36,6 +36,7 @@ class RepositoryInfo(BaseModel):
     status: str
     documents_count: int = 0  # Number of chunks in vector store
     original_files_count: int = 0  # Number of original files in repository
+    file_patterns: Optional[List[str]] = None  # File patterns used for indexing
     last_indexed: Optional[str] = None
     error: Optional[str] = None
 

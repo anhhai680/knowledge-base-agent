@@ -130,6 +130,7 @@ async def restore_indexed_repositories():
                         status="indexed",
                         documents_count=len(repo_docs),
                         original_files_count=original_files_count,
+                        file_patterns=[f"*{ext}" for ext in settings.github_supported_file_extensions],
                         last_indexed=last_indexed,
                         error=None
                     )
@@ -398,6 +399,7 @@ async def index_single_repository_task(repo_url: str, branch: str = "main", file
             last_indexed=datetime.now().isoformat(),
             documents_count=0,
             original_files_count=0,
+            file_patterns=[f"*{ext}" for ext in settings.github_supported_file_extensions],
             status="indexing"
         )
         
