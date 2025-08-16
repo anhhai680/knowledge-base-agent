@@ -110,12 +110,16 @@ async def restore_indexed_repositories():
                     # Try to extract additional metadata from the first document
                     branch = "main"  # Default branch
                     last_indexed = datetime.now().isoformat()  # Default to now
+                    original_files_count = len(repo_docs)  # Default to chunk count for backward compatibility
                     
                     if repo_docs and metadatas:
                         first_doc_meta = metadatas[repo_docs[0]]
                         if first_doc_meta:
                             branch = first_doc_meta.get("branch", "main")
                             last_indexed = first_doc_meta.get("indexed_at", datetime.now().isoformat())
+                            # Try to get original file count from metadata
+                            if "original_file_count" in first_doc_meta:
+                                original_files_count = first_doc_meta["original_file_count"]
                     
                     indexed_repositories[repo_id] = RepositoryInfo(
                         id=repo_id,
@@ -125,11 +129,12 @@ async def restore_indexed_repositories():
                         branch=branch,
                         status="indexed",
                         documents_count=len(repo_docs),
+                        original_files_count=original_files_count,
                         last_indexed=last_indexed,
                         error=None
                     )
                     
-                    logger.info(f"Restored repository: {repo_url} with {len(repo_docs)} documents")
+                    logger.info(f"Restored repository: {repo_url} with {len(repo_docs)} chunks")
                     
             except Exception as e:
                 logger.error(f"Error processing collection {collection.name}: {str(e)}")
@@ -388,6 +393,7 @@ async def index_single_repository_task(repo_url: str, branch: str = "main", file
             branch=branch,
             last_indexed=datetime.now().isoformat(),
             documents_count=0,
+            original_files_count=0,
             status="indexing"
         )
         
@@ -418,7 +424,8 @@ async def index_single_repository_task(repo_url: str, branch: str = "main", file
             doc.metadata.update({
                 "repository": repo_url,
                 "branch": branch,
-                "indexed_at": datetime.now().isoformat()
+                "indexed_at": datetime.now().isoformat(),
+                "original_file_count": len(documents)  # Store original file count
             })
         
         # Process and chunk the documents
@@ -431,11 +438,12 @@ async def index_single_repository_task(repo_url: str, branch: str = "main", file
         rag_agent.add_documents(processed_docs)
         
         # Update repository info
-        indexed_repositories[repo_name].documents_count = len(processed_docs)
+        indexed_repositories[repo_name].documents_count = len(processed_docs)  # Number of chunks
+        indexed_repositories[repo_name].original_files_count = len(documents)  # Number of original files
         indexed_repositories[repo_name].status = "indexed"
         indexed_repositories[repo_name].last_indexed = datetime.now().isoformat()
         
-        logger.info(f"Successfully indexed {len(processed_docs)} documents from {repo_url}")
+        logger.info(f"Successfully indexed {len(processed_docs)} chunks from {len(documents)} files in {repo_url}")
         
     except Exception as e:
         logger.error(f"Error indexing repository {repo_url}: {str(e)}")
@@ -454,6 +462,13 @@ async def get_repositories():
     # If empty, try to restore from database
     if not indexed_repositories:
         await restore_indexed_repositories()
+    
+    # Add summary statistics
+    total_files = sum(repo.original_files_count for repo in indexed_repositories.values())
+    total_chunks = sum(repo.documents_count for repo in indexed_repositories.values())
+    
+    logger.info(f"Repository summary: {len(indexed_repositories)} repos, {total_files} files, {total_chunks} chunks")
+    
     return list(indexed_repositories.values())
 
 @app.delete("/repositories/{repository_id}")
@@ -462,6 +477,63 @@ async def delete_repository(repository_id: str):
     # This would require implementing document deletion by repository
     # For MVP, we'll return a simple response
     return {"message": f"Repository deletion not implemented in MVP", "repository_id": repository_id}
+
+
+@app.post("/repositories/{repository_id}/reindex")
+async def reindex_repository(repository_id: str):
+    """Re-index a specific repository to update counts and metadata"""
+    try:
+        # Find the repository
+        if repository_id not in indexed_repositories:
+            return {"error": f"Repository {repository_id} not found"}
+        
+        repo_info = indexed_repositories[repository_id]
+        repo_url = repo_info.url
+        branch = repo_info.branch
+        
+        logger.info(f"Re-indexing repository: {repo_url}")
+        
+        # Start re-indexing in background
+        await index_single_repository_task(repo_url, branch)
+        
+        return {
+            "message": f"Repository {repository_id} re-indexing started",
+            "repository_id": repository_id,
+            "status": "reindexing"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to start re-indexing for {repository_id}: {str(e)}")
+        return {"error": f"Failed to start re-indexing: {str(e)}"}
+
+
+@app.post("/repositories/reindex-all")
+async def reindex_all_repositories():
+    """Re-index all repositories to update counts and metadata"""
+    try:
+        if not indexed_repositories:
+            return {"error": "No repositories found to re-index"}
+        
+        repo_count = len(indexed_repositories)
+        logger.info(f"Starting re-index of {repo_count} repositories")
+        
+        # Start re-indexing all repositories in background
+        for repo_id, repo_info in indexed_repositories.items():
+            try:
+                await index_single_repository_task(repo_info.url, repo_info.branch)
+            except Exception as e:
+                logger.error(f"Failed to re-index {repo_id}: {str(e)}")
+                continue
+        
+        return {
+            "message": f"Re-indexing started for {repo_count} repositories",
+            "repositories_count": repo_count,
+            "status": "reindexing"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to start bulk re-indexing: {str(e)}")
+        return {"error": f"Failed to start bulk re-indexing: {str(e)}"}
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
