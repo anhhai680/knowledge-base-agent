@@ -132,7 +132,8 @@ class EmbeddingFactory:
         embedding_model = model if model else "text-embedding-ada-002"
         
         return OpenAIEmbeddings(
-            api_key=settings.openai_api_key,
+            api_key=settings.embedding_api_key,
+            base_url=settings.embedding_api_base_url,
             model=embedding_model,
             max_retries=3,
             request_timeout=30

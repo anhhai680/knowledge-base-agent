@@ -7,18 +7,20 @@ logger = get_logger(__name__)
 class OpenAILLM:
     """OpenAI LLM implementation"""
     
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini", temperature: float = 0.7, max_tokens: int = 4000):
+    def __init__(self, api_key: str, model: str = "gpt-4o-mini", temperature: float = 0.7, max_tokens: int = 4000, base_url: str = "https://api.openai.com/v1"):
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.base_url = base_url
         
         try:
             self.llm = ChatOpenAI(
                 openai_api_key=api_key,
                 model=model,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                base_url=base_url
             )
             logger.info(f"OpenAI LLM initialized with model: {model}")
         except Exception as e:
@@ -44,5 +46,6 @@ class OpenAILLM:
             "provider": "openai",
             "model": self.model,
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens
+            "max_tokens": self.max_tokens,
+            "base_url": self.base_url
         }
