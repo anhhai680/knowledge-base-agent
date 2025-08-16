@@ -1,7 +1,29 @@
 from pydantic_settings import BaseSettings
-from pydantic import validator
+from pydantic import validator, Field
 from typing import List, Optional
 import os
+import json
+
+def parse_github_repos(value: str) -> List[str]:
+    """Parse GITHUB_REPOS value, supporting both JSON and comma-separated formats"""
+    if not value:
+        return []
+    
+    try:
+        # Try to parse as JSON first
+        parsed = json.loads(value)
+        if isinstance(parsed, list):
+            return parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+    
+    # Fall back to comma-separated format
+    if ',' in value:
+        return [repo.strip() for repo in value.split(',') if repo.strip()]
+    elif value.strip():
+        return [value.strip()]
+    else:
+        return []
 
 class Settings(BaseSettings):
     # LLM Configuration
@@ -34,7 +56,7 @@ class Settings(BaseSettings):
     
     # GitHub Settings
     github_token: Optional[str] = None
-    github_repos: List[str] = []
+    github_repos: List[str] = Field(default_factory=list, description="GitHub repositories to index")
     github_branch: List[str] = ["main", "master"]
     github_supported_file_extensions: List[str] = [
         ".cs", ".py", ".sh", ".js", ".jsx", ".ts", ".tsx", ".md", 
@@ -74,6 +96,13 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             # Split on # and take the first part, then strip whitespace
             return v.split('#')[0].strip()
+        return v
+    
+    @validator('github_repos', pre=True)
+    def parse_github_repos_validator(cls, v):
+        """Parse GITHUB_REPOS from environment variable, supporting both JSON and comma-separated formats"""
+        if isinstance(v, str):
+            return parse_github_repos(v)
         return v
     
     class Config:

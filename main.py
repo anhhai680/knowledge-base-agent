@@ -30,13 +30,24 @@ def main():
         # Disable reload in containerized environments to prevent restart loops
         use_reload = settings.app_env == "development" and not os.getenv("DOCKER_CONTAINER", False)
         
-        uvicorn.run(
-            app,
-            host=settings.api_host,
-            port=settings.api_port,
-            reload=use_reload,
-            log_level=settings.log_level.lower()
-        )
+        if use_reload:
+            # Use import string for reload mode
+            uvicorn.run(
+                "src.api.routes:app",
+                host=settings.api_host,
+                port=settings.api_port,
+                reload=True,
+                log_level=settings.log_level.lower()
+            )
+        else:
+            # Use app object directly when reload is disabled
+            uvicorn.run(
+                app,
+                host=settings.api_host,
+                port=settings.api_port,
+                reload=False,
+                log_level=settings.log_level.lower()
+            )
         
     except Exception as e:
         print(f"💥 Failed to start application: {e}")
