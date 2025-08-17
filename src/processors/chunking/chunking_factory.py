@@ -5,7 +5,7 @@ Factory for selecting appropriate chunking strategy based on file extension.
 from typing import Dict, List
 from langchain.docstore.document import Document
 
-from src.config import settings
+from ...config import settings
 
 from .base_chunker import BaseChunker
 from .fallback_chunker import FallbackChunker
@@ -116,8 +116,17 @@ class ChunkingFactory:
         chunker_stats = {}
         failed_documents = 0
         
-        for document in documents:
+        # Add safety check for document count
+        if len(documents) > 1000:  # Prevent processing too many documents at once
+            logger.warning(f"Too many documents ({len(documents)}), limiting to 1000")
+            documents = documents[:1000]
+        
+        for i, document in enumerate(documents):
             try:
+                # Add progress logging for large document sets
+                if len(documents) > 100 and i % 100 == 0:
+                    logger.info(f"Chunking progress: {i}/{len(documents)} documents processed")
+                
                 # Get file path from metadata
                 file_path = document.metadata.get('file_path', '')
                 
@@ -130,8 +139,8 @@ class ChunkingFactory:
                     chunker_stats[chunker_name] = 0
                 chunker_stats[chunker_name] += 1
                 
-                # Chunk the document
-                chunks = chunker.chunk_document(document)
+                # Chunk the document with timeout protection
+                chunks = self._chunk_document_with_timeout(chunker, document, chunker_name)
                 
                 if not chunks:
                     logger.warning(f"Chunker {chunker_name} produced no chunks for document: {file_path}")
@@ -162,6 +171,46 @@ class ChunkingFactory:
             logger.info(f"Chunk validation resulted in {len(validated_documents)} final chunks (split {len(validated_documents) - total_chunks} oversized chunks)")
         
         return validated_documents
+    
+    def _chunk_document_with_timeout(self, chunker: BaseChunker, document: Document, chunker_name: str, timeout_seconds: int = 30) -> List[Document]:
+        """
+        Chunk a single document with timeout protection.
+        
+        Args:
+            chunker: The chunker to use
+            document: Document to chunk
+            chunker_name: Name of the chunker for logging
+            timeout_seconds: Maximum time to spend on chunking
+            
+        Returns:
+            List of chunked documents
+        """
+        import threading
+        
+        result = [None]
+        error = [None]
+        
+        def chunk_document():
+            try:
+                result[0] = chunker.chunk_document(document)
+            except Exception as e:
+                error[0] = e
+        
+        # Run chunking in a separate thread with timeout
+        thread = threading.Thread(target=chunk_document)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=timeout_seconds)
+        
+        if thread.is_alive():
+            logger.warning(f"Chunking timeout for {chunker_name} on document {document.metadata.get('file_path', 'unknown')}")
+            return []
+        
+        if error[0]:
+            logger.error(f"Chunking error in {chunker_name}: {error[0]}")
+            return []
+            
+        return result[0] or []
     
     def _validate_chunk_sizes(self, documents: List[Document]) -> List[Document]:
         """

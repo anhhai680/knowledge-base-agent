@@ -7,10 +7,13 @@ language-specific parsers.
 """
 
 import time
+import signal
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any, Union, Callable
 import tree_sitter as ts
 from pathlib import Path
+import threading
+import sys
 
 from .semantic_element import (
     SemanticElement, 
@@ -36,6 +39,11 @@ class AdvancedParserError(ParsingError):
 
 class FallbackError(ParsingError):
     """Exception when fallback parsing is required."""
+    pass
+
+
+class ParsingTimeoutError(ParsingError):
+    """Exception when parsing times out."""
     pass
 
 
@@ -66,9 +74,15 @@ class AdvancedParser(ABC):
         self.extract_documentation = self.config.get('extract_documentation', True)
         self.include_comments = self.config.get('include_comments', False)
         
+        # Performance and safety options
+        self.max_parse_time = self.config.get('max_parse_time_seconds', 30)  # 30 second timeout
+        self.max_recursion_depth = self.config.get('max_recursion_depth', 100)  # Prevent infinite recursion
+        self.max_elements_per_file = self.config.get('max_elements_per_file', 1000)  # Prevent memory issues
+        
         # Performance tracking
         self._parse_count = 0
         self._total_parse_time = 0.0
+        self._failed_parses = 0
         
         # Initialize the tree-sitter parser
         self._initialize_parser()
@@ -76,12 +90,47 @@ class AdvancedParser(ABC):
     def _initialize_parser(self) -> None:
         """Initialize the tree-sitter parser and language."""
         try:
-            self._language = self._get_tree_sitter_language()
-            self._parser = ts.Parser(self._language)
+            # Add timeout protection for language loading
+            self._language = self._get_tree_sitter_language_with_timeout()
+            if not self._language:
+                raise AdvancedParserError("Failed to load tree-sitter language")
+                
+            self._parser = ts.Parser()
+            self._parser.set_language(self._language)
             logger.debug(f"Initialized tree-sitter parser for {self.language_name}")
+            
         except Exception as e:
             logger.error(f"Failed to initialize tree-sitter parser for {self.language_name}: {e}")
-            raise AdvancedParserError(f"Parser initialization failed: {e}")
+            # Don't raise here, allow fallback to work
+            self._parser = None
+            self._language = None
+    
+    def _get_tree_sitter_language_with_timeout(self) -> Optional[ts.Language]:
+        """Get tree-sitter language with timeout protection."""
+        result = [None]
+        error = [None]
+        
+        def load_language():
+            try:
+                result[0] = self._get_tree_sitter_language()
+            except Exception as e:
+                error[0] = e
+        
+        # Run language loading in a separate thread with timeout
+        thread = threading.Thread(target=load_language)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=10)  # 10 second timeout for language loading
+        
+        if thread.is_alive():
+            logger.error(f"Language loading timeout for {self.language_name}")
+            return None
+        
+        if error[0]:
+            logger.error(f"Language loading error for {self.language_name}: {error[0]}")
+            return None
+            
+        return result[0]
     
     @abstractmethod
     def _get_tree_sitter_language(self) -> ts.Language:
@@ -127,6 +176,10 @@ class AdvancedParser(ABC):
         )
         
         try:
+            # Check if parser is available
+            if not self._parser or not self._language:
+                raise FallbackError("Tree-sitter parser not available")
+            
             # Validate input
             if not source_code.strip():
                 result.add_warning("Empty source code provided")
@@ -135,8 +188,11 @@ class AdvancedParser(ABC):
             if len(source_code.encode('utf-8')) > self.max_file_size:
                 raise FallbackError(f"File too large: {len(source_code)} bytes > {self.max_file_size}")
             
-            # Parse with tree-sitter
-            tree = self._parse_with_tree_sitter(source_code)
+            # Parse with tree-sitter with timeout protection
+            tree = self._parse_with_tree_sitter_with_timeout(source_code)
+            if not tree:
+                raise FallbackError("Parsing timed out")
+                
             result.tree_objects = tree
             
             # Check for parse errors
@@ -148,8 +204,8 @@ class AdvancedParser(ABC):
                 else:
                     raise FallbackError(error_msg)
             
-            # Extract semantic elements
-            result.elements = self._extract_semantic_elements(tree, source_code)
+            # Extract semantic elements with safety checks
+            result.elements = self._extract_semantic_elements_safe(tree, source_code)
             
             # Validate extracted elements
             self._validate_elements(result.elements, source_code)
@@ -157,9 +213,11 @@ class AdvancedParser(ABC):
         except FallbackError as e:
             result.add_error(f"Fallback required: {e}")
             logger.warning(f"Parser fallback required for {file_path or 'unknown'}: {e}")
+            self._failed_parses += 1
         except Exception as e:
             result.add_error(f"Parsing failed: {e}")
             logger.error(f"Parsing error in {file_path or 'unknown'}: {e}")
+            self._failed_parses += 1
         
         # Record timing
         result.parse_time_ms = (time.time() - start_time) * 1000
@@ -171,26 +229,74 @@ class AdvancedParser(ABC):
         
         return result
     
-    def _parse_with_tree_sitter(self, source_code: str) -> ts.Tree:
+    def _parse_with_tree_sitter_with_timeout(self, source_code: str) -> Optional[ts.Tree]:
         """
-        Parse source code with tree-sitter.
+        Parse source code with tree-sitter with timeout protection.
         
         Args:
             source_code: Source code to parse
             
         Returns:
-            Parsed tree-sitter tree
+            Parsed tree-sitter tree or None if timeout
         """
         if not self._parser:
-            raise AdvancedParserError("Parser not initialized")
+            return None
         
+        result = [None]
+        error = [None]
+        
+        def parse_code():
+            try:
+                # Convert to bytes for tree-sitter
+                source_bytes = source_code.encode('utf-8')
+                result[0] = self._parser.parse(source_bytes)
+            except Exception as e:
+                error[0] = e
+        
+        # Run parsing in a separate thread with timeout
+        thread = threading.Thread(target=parse_code)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=self.max_parse_time)
+        
+        if thread.is_alive():
+            logger.warning(f"Parsing timeout for {self.language_name} file")
+            return None
+        
+        if error[0]:
+            logger.error(f"Parsing error: {error[0]}")
+            return None
+            
+        return result[0]
+    
+    def _extract_semantic_elements_safe(self, tree: ts.Tree, source_code: str) -> List[SemanticElement]:
+        """
+        Extract semantic elements with safety checks to prevent infinite loops.
+        
+        Args:
+            tree: The parsed tree-sitter tree
+            source_code: Original source code
+            
+        Returns:
+            List of extracted semantic elements
+        """
         try:
-            # Convert to bytes for tree-sitter
-            source_bytes = source_code.encode('utf-8')
-            tree = self._parser.parse(source_bytes)
-            return tree
+            # Add recursion depth tracking
+            elements = self._extract_semantic_elements(tree, source_code)
+            
+            # Safety check: limit number of elements
+            if len(elements) > self.max_elements_per_file:
+                logger.warning(f"Too many elements ({len(elements)}), limiting to {self.max_elements_per_file}")
+                elements = elements[:self.max_elements_per_file]
+            
+            return elements
+            
+        except RecursionError:
+            logger.error("Recursion error during semantic extraction")
+            return []
         except Exception as e:
-            raise AdvancedParserError(f"Tree-sitter parsing failed: {e}")
+            logger.error(f"Error during semantic extraction: {e}")
+            return []
     
     def _validate_elements(self, elements: List[SemanticElement], source_code: str) -> None:
         """
@@ -200,25 +306,32 @@ class AdvancedParser(ABC):
             elements: List of semantic elements to validate
             source_code: Original source code for position validation
         """
+        if not elements:
+            return
+            
         source_lines = source_code.split('\n')
         source_length = len(source_code)
         
         for element in elements:
-            # Validate position bounds
-            if element.position.start_byte < 0 or element.position.end_byte > source_length:
-                logger.warning(f"Element '{element.name}' has invalid byte position")
-            
-            if element.position.start_line < 1 or element.position.end_line > len(source_lines):
-                logger.warning(f"Element '{element.name}' has invalid line position")
-            
-            # Validate content consistency
-            if element.content:
-                try:
-                    extracted_content = source_code[element.position.start_byte:element.position.end_byte]
-                    if element.content.strip() != extracted_content.strip():
-                        logger.debug(f"Element '{element.name}' content may not match position")
-                except IndexError:
-                    logger.warning(f"Element '{element.name}' position out of bounds")
+            try:
+                # Validate position bounds
+                if element.position.start_byte < 0 or element.position.end_byte > source_length:
+                    logger.warning(f"Element '{element.name}' has invalid byte position")
+                
+                if element.position.start_line < 1 or element.position.end_line > len(source_lines):
+                    logger.warning(f"Element '{element.name}' has invalid line position")
+                
+                # Validate content consistency
+                if element.content:
+                    try:
+                        extracted_content = source_code[element.position.start_byte:element.position.end_byte]
+                        if element.content.strip() != extracted_content.strip():
+                            logger.debug(f"Element '{element.name}' content may not match position")
+                    except IndexError:
+                        logger.warning(f"Element '{element.name}' position out of bounds")
+            except Exception as e:
+                logger.warning(f"Error validating element {element.name}: {e}")
+                continue
     
     def _create_position(self, node: ts.Node) -> SemanticPosition:
         """
@@ -230,14 +343,23 @@ class AdvancedParser(ABC):
         Returns:
             SemanticPosition object
         """
-        return SemanticPosition(
-            start_line=node.start_point[0] + 1,  # Convert to 1-based
-            end_line=node.end_point[0] + 1,
-            start_column=node.start_point[1],
-            end_column=node.end_point[1],
-            start_byte=node.start_byte,
-            end_byte=node.end_byte
-        )
+        try:
+            return SemanticPosition(
+                start_line=node.start_point[0] + 1,  # Convert to 1-based
+                end_line=node.end_point[0] + 1,
+                start_column=node.start_point[1],
+                end_column=node.end_point[1],
+                start_byte=node.start_byte,
+                end_byte=node.end_byte
+            )
+        except Exception as e:
+            logger.warning(f"Error creating position from node: {e}")
+            # Return safe default position
+            return SemanticPosition(
+                start_line=1, end_line=1,
+                start_column=0, end_column=0,
+                start_byte=0, end_byte=0
+            )
     
     def _get_node_text(self, node: ts.Node, source_code: str) -> str:
         """
@@ -267,10 +389,14 @@ class AdvancedParser(ABC):
         Returns:
             First matching child node or None
         """
-        for child in node.children:
-            if child.type == node_type:
-                return child
-        return None
+        try:
+            for child in node.children:
+                if child.type == node_type:
+                    return child
+            return None
+        except Exception as e:
+            logger.warning(f"Error finding child by type: {e}")
+            return None
     
     def _find_children_by_type(self, node: ts.Node, node_type: str) -> List[ts.Node]:
         """
@@ -283,7 +409,11 @@ class AdvancedParser(ABC):
         Returns:
             List of matching child nodes
         """
-        return [child for child in node.children if child.type == node_type]
+        try:
+            return [child for child in node.children if child.type == node_type]
+        except Exception as e:
+            logger.warning(f"Error finding children by type: {e}")
+            return []
     
     def _extract_documentation_comment(self, node: ts.Node, source_code: str) -> Optional[str]:
         """
@@ -299,20 +429,24 @@ class AdvancedParser(ABC):
         if not self.extract_documentation:
             return None
         
-        # This is a base implementation that can be overridden by language-specific parsers
-        # Look for comment nodes immediately before this node
-        parent = node.parent
-        if not parent:
+        try:
+            # This is a base implementation that can be overridden by language-specific parsers
+            # Look for comment nodes immediately before this node
+            parent = node.parent
+            if not parent:
+                return None
+            
+            node_index = parent.children.index(node)
+            if node_index > 0:
+                prev_node = parent.children[node_index - 1]
+                if 'comment' in prev_node.type:
+                    comment_text = self._get_node_text(prev_node, source_code)
+                    return self._clean_comment_text(comment_text)
+            
             return None
-        
-        node_index = parent.children.index(node)
-        if node_index > 0:
-            prev_node = parent.children[node_index - 1]
-            if 'comment' in prev_node.type:
-                comment_text = self._get_node_text(prev_node, source_code)
-                return self._clean_comment_text(comment_text)
-        
-        return None
+        except Exception as e:
+            logger.debug(f"Error extracting documentation comment: {e}")
+            return None
     
     def _clean_comment_text(self, comment: str) -> str:
         """
@@ -327,21 +461,25 @@ class AdvancedParser(ABC):
         if not comment:
             return ""
         
-        # Remove common comment markers
-        lines = comment.split('\n')
-        cleaned_lines = []
-        
-        for line in lines:
-            line = line.strip()
-            # Remove common prefixes
-            for prefix in ['//', '///', '/*', '*/', '*', '#']:
-                if line.startswith(prefix):
-                    line = line[len(prefix):].strip()
-                    break
-            if line:  # Only add non-empty lines
-                cleaned_lines.append(line)
-        
-        return '\n'.join(cleaned_lines).strip()
+        try:
+            # Remove common comment markers
+            lines = comment.split('\n')
+            cleaned_lines = []
+            
+            for line in lines:
+                line = line.strip()
+                # Remove common prefixes
+                for prefix in ['//', '///', '/*', '*/', '*', '#']:
+                    if line.startswith(prefix):
+                        line = line[len(prefix):].strip()
+                        break
+                if line:  # Only add non-empty lines
+                    cleaned_lines.append(line)
+            
+            return '\n'.join(cleaned_lines).strip()
+        except Exception as e:
+            logger.debug(f"Error cleaning comment text: {e}")
+            return comment.strip()
     
     def get_statistics(self) -> Dict[str, Any]:
         """
@@ -355,17 +493,22 @@ class AdvancedParser(ABC):
         return {
             "language": self.language_name,
             "parse_count": self._parse_count,
+            "failed_parses": self._failed_parses,
             "total_parse_time_ms": self._total_parse_time,
             "average_parse_time_ms": avg_parse_time,
             "max_file_size_mb": self.max_file_size / (1024 * 1024),
             "error_recovery_enabled": self.enable_error_recovery,
-            "documentation_extraction_enabled": self.extract_documentation
+            "documentation_extraction_enabled": self.extract_documentation,
+            "max_parse_time_seconds": self.max_parse_time,
+            "max_recursion_depth": self.max_recursion_depth,
+            "max_elements_per_file": self.max_elements_per_file
         }
     
     def reset_statistics(self) -> None:
         """Reset parser statistics."""
         self._parse_count = 0
         self._total_parse_time = 0.0
+        self._failed_parses = 0
     
     def __str__(self) -> str:
         """String representation of the parser."""
@@ -375,4 +518,5 @@ class AdvancedParser(ABC):
         """Detailed string representation of the parser."""
         return (f"AdvancedParser(language='{self.language_name}', "
                f"parsed_files={self._parse_count}, "
+               f"failed_parses={self._failed_parses}, "
                f"avg_time={self._total_parse_time / max(self._parse_count, 1):.2f}ms)")

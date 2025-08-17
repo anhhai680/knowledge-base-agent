@@ -5,12 +5,8 @@ AST-based parser for extracting semantic chunks from source code.
 import ast
 import re
 from typing import List, Dict, Any, Optional, Tuple, NamedTuple
-import sys
-import os.path
 
-# Add the parent directory to the path to import from utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-from utils.logging import get_logger
+from ....utils.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -35,6 +31,8 @@ class ASTParser:
         """Initialize the AST parser."""
         self.elements: List[CodeElement] = []
         self.source_lines: List[str] = []
+        self.max_recursion_depth = 100  # Prevent infinite recursion
+        self.current_recursion_depth = 0
     
     def parse_python_code(self, code: str) -> List[CodeElement]:
         """
@@ -48,6 +46,7 @@ class ASTParser:
         """
         self.elements = []
         self.source_lines = code.split('\n')
+        self.current_recursion_depth = 0
         
         try:
             tree = ast.parse(code)
@@ -61,6 +60,9 @@ class ASTParser:
         except SyntaxError as e:
             logger.warning(f"Syntax error in Python code: {str(e)}")
             return self._fallback_parse(code)
+        except RecursionError as e:
+            logger.error(f"Recursion error in Python code: {str(e)}")
+            return self._fallback_parse(code)
         except Exception as e:
             logger.warning(f"Error parsing Python code: {str(e)}")
             return self._fallback_parse(code)
@@ -73,58 +75,70 @@ class ASTParser:
             node: AST node to visit
             parent_name: Name of parent element (for methods in classes)
         """
-        if isinstance(node, ast.Module):
-            # Handle module-level docstring
-            if (node.body and 
-                isinstance(node.body[0], ast.Expr) and 
-                isinstance(node.body[0].value, ast.Constant) and
-                isinstance(node.body[0].value.value, str)):
+        # Check recursion depth
+        self.current_recursion_depth += 1
+        if self.current_recursion_depth > self.max_recursion_depth:
+            logger.error(f"Maximum recursion depth ({self.max_recursion_depth}) exceeded")
+            self.current_recursion_depth -= 1
+            return
+        
+        try:
+            if isinstance(node, ast.Module):
+                # Handle module-level docstring
+                if (node.body and 
+                    isinstance(node.body[0], ast.Expr) and 
+                    isinstance(node.body[0].value, ast.Constant) and
+                    isinstance(node.body[0].value.value, str)):
+                    
+                    docstring = node.body[0].value.value
+                    self.elements.append(CodeElement(
+                        name="__module__",
+                        element_type="module",
+                        start_line=1,
+                        end_line=node.body[0].end_lineno or 1,
+                        content=self._get_content(1, node.body[0].end_lineno or 1),
+                        docstring=docstring
+                    ))
                 
-                docstring = node.body[0].value.value
-                self.elements.append(CodeElement(
-                    name="__module__",
-                    element_type="module",
-                    start_line=1,
-                    end_line=node.body[0].end_lineno or 1,
-                    content=self._get_content(1, node.body[0].end_lineno or 1),
-                    docstring=docstring
-                ))
+                # Handle imports at module level
+                imports = []
+                for child in node.body:
+                    if isinstance(child, (ast.Import, ast.ImportFrom)):
+                        imports.append(child)
+                
+                if imports:
+                    start_line = imports[0].lineno
+                    end_line = imports[-1].end_lineno or imports[-1].lineno
+                    self.elements.append(CodeElement(
+                        name="__imports__",
+                        element_type="import",
+                        start_line=start_line,
+                        end_line=end_line,
+                        content=self._get_content(start_line, end_line)
+                    ))
+                
+                # Visit other module-level elements
+                for child in node.body:
+                    if not isinstance(child, (ast.Import, ast.ImportFrom)):
+                        self._visit_node(child, parent_name)
             
-            # Handle imports at module level
-            imports = []
-            for child in node.body:
-                if isinstance(child, (ast.Import, ast.ImportFrom)):
-                    imports.append(child)
+            elif isinstance(node, ast.ClassDef):
+                self._handle_class(node, parent_name)
             
-            if imports:
-                start_line = imports[0].lineno
-                end_line = imports[-1].end_lineno or imports[-1].lineno
-                self.elements.append(CodeElement(
-                    name="__imports__",
-                    element_type="import",
-                    start_line=start_line,
-                    end_line=end_line,
-                    content=self._get_content(start_line, end_line)
-                ))
+            elif isinstance(node, ast.FunctionDef):
+                self._handle_function(node, parent_name)
             
-            # Visit other module-level elements
-            for child in node.body:
-                if not isinstance(child, (ast.Import, ast.ImportFrom)):
+            elif isinstance(node, ast.AsyncFunctionDef):
+                self._handle_function(node, parent_name, is_async=True)
+            
+            else:
+                # Visit child nodes
+                for child in ast.iter_child_nodes(node):
                     self._visit_node(child, parent_name)
-        
-        elif isinstance(node, ast.ClassDef):
-            self._handle_class(node, parent_name)
-        
-        elif isinstance(node, ast.FunctionDef):
-            self._handle_function(node, parent_name)
-        
-        elif isinstance(node, ast.AsyncFunctionDef):
-            self._handle_function(node, parent_name, is_async=True)
-        
-        else:
-            # Visit child nodes
-            for child in ast.iter_child_nodes(node):
-                self._visit_node(child, parent_name)
+                    
+        finally:
+            # Always decrement recursion depth
+            self.current_recursion_depth -= 1
     
     def _handle_class(self, node: ast.ClassDef, parent_name: Optional[str] = None) -> None:
         """Handle class definition."""

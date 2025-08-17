@@ -163,6 +163,7 @@ Answer:
                 "answer": "I encountered an error while processing your query. Please try again.",
                 "source_documents": [],
                 "status": "error",
+                "num_sources": 0,
                 "error": str(e)
             }
     

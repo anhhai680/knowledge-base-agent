@@ -36,34 +36,77 @@ class ChromaStore(BaseVectorStore):
         logger.info("Using single embedding model for consistency")
         
         # Initialize Chroma with simplified approach
+        logger.info(f"ChromaStore init - host: '{self.host}' (type: {type(self.host)}, len: {len(self.host)}), port: {self.port}, collection: '{self.collection_name}'")
+        logger.info(f"Host comparison details: '{self.host}' == 'localhost': {self.host == 'localhost'}, '{self.host}' == '127.0.0.1': {self.host == '127.0.0.1'}")
         self._initialize_chroma_simple()
     
     def _initialize_chroma_simple(self):
         """Initialize Chroma with a simple, robust approach"""
         try:
-            # Use persistent client for reliability
-            logger.info("Initializing Chroma with persistent client")
-            
-            # Only clean directory if it's corrupted or empty
-            if not self._is_persist_directory_valid():
-                logger.info("Persist directory needs cleanup, performing maintenance")
-                self._ensure_clean_persist_directory()
+            # Check if we should use remote or local ChromaDB
+            logger.info(f"Host comparison: '{self.host}' != 'localhost' = {self.host != 'localhost'}, '{self.host}' != '127.0.0.1' = {self.host != '127.0.0.1'}")
+            if self.host != "localhost" and self.host != "127.0.0.1":
+                # Remote ChromaDB connection
+                logger.info(f"Initializing Chroma with remote client: {self.host}:{self.port}")
+                self._initialize_remote_chroma()
             else:
-                logger.info("Persist directory is valid, skipping cleanup")
-            
-            # Create the vector store
-            self.vector_store = Chroma(
-                collection_name=self.collection_name,
-                embedding_function=self.embedding_function,
-                persist_directory=self.persist_directory
-            )
-            
-            logger.info(f"ChromaStore initialized successfully in: {self.persist_directory}")
+                # Local ChromaDB with persist directory
+                logger.info("Initializing Chroma with persistent client")
+                
+                # Only clean directory if it's corrupted or empty
+                if not self._is_persist_directory_valid():
+                    logger.info("Persist directory needs cleanup, performing maintenance")
+                    self._ensure_clean_persist_directory()
+                else:
+                    logger.info("Persist directory is valid, skipping cleanup")
+                
+                # Create the vector store
+                self.vector_store = Chroma(
+                    collection_name=self.collection_name,
+                    embedding_function=self.embedding_function,
+                    persist_directory=self.persist_directory
+                )
+                
+                logger.info(f"ChromaStore initialized successfully in: {self.persist_directory}")
             
         except Exception as e:
             logger.error(f"Failed to initialize ChromaStore: {str(e)}")
             # Try to create in a completely different location
             self._initialize_in_alternative_location()
+    
+    def _initialize_remote_chroma(self):
+        """Initialize Chroma with remote ChromaDB connection"""
+        try:
+            # Create HTTP client for remote ChromaDB
+            client = chromadb.HttpClient(
+                host=self.host,
+                port=self.port
+            )
+            
+            # Check if collection exists, create if it doesn't
+            try:
+                collection = client.get_collection(self.collection_name)
+                logger.info(f"Connected to existing collection: {self.collection_name}")
+            except Exception:
+                logger.info(f"Collection {self.collection_name} not found, creating new one")
+                collection = client.create_collection(
+                    name=self.collection_name,
+                    metadata={"hnsw:space": "cosine"}
+                )
+                logger.info(f"Created new collection: {self.collection_name}")
+            
+            # Create the vector store with remote client
+            self.vector_store = Chroma(
+                client=client,
+                collection_name=self.collection_name,
+                embedding_function=self.embedding_function
+            )
+            
+            logger.info(f"ChromaStore initialized successfully with remote client: {self.host}:{self.port}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize remote Chroma: {str(e)}")
+            raise
     
     def _is_persist_directory_valid(self):
         """Check if the persist directory is valid and contains data"""

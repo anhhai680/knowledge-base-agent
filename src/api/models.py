@@ -34,8 +34,9 @@ class RepositoryInfo(BaseModel):
     description: Optional[str] = None
     branch: Optional[str] = "main"
     status: str
-    documents_count: int = 0
-    document_count: Optional[int] = None  # For backward compatibility
+    documents_count: int = 0  # Number of chunks in vector store
+    original_files_count: int = 0  # Number of original files in repository
+    file_patterns: Optional[List[str]] = None  # File patterns used for indexing
     last_indexed: Optional[str] = None
     error: Optional[str] = None
 
