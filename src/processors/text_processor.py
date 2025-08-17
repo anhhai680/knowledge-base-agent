@@ -2,7 +2,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.docstore.document import Document
 from typing import List, Optional
 
-from src.config import settings
+from ..config import settings
 from ..utils.logging import get_logger
 from .chunking import ChunkingFactory, PythonChunker, CSharpChunker, JavaScriptChunker, TypeScriptChunker, MarkdownChunker
 from ..config.chunking_config import ChunkingConfigManager
@@ -183,15 +183,21 @@ class TextProcessor:
             if skipped_empty > 0:
                 logger.info(f"Skipped {skipped_empty} empty documents during enhanced processing")
             
-            # Use chunking factory to process documents
+            # Use chunking factory to process documents with timeout protection
             if cleaned_documents:
                 logger.debug(f"Processing {len(cleaned_documents)} cleaned documents with enhanced chunking")
-                chunked_docs = self.chunking_factory.chunk_documents(cleaned_documents)
-                processed_docs.extend(chunked_docs)
                 
-                # Log the chunking ratio for monitoring
-                avg_chunks_per_doc = len(chunked_docs) / len(cleaned_documents) if cleaned_documents else 0
-                logger.info(f"Enhanced chunking: Generated {len(processed_docs)} chunks from {len(cleaned_documents)} cleaned documents (avg: {avg_chunks_per_doc:.2f} chunks/doc)")
+                # Add timeout protection for chunking
+                chunked_docs = self._chunk_documents_with_timeout(cleaned_documents)
+                if chunked_docs:
+                    processed_docs.extend(chunked_docs)
+                    
+                    # Log the chunking ratio for monitoring
+                    avg_chunks_per_doc = len(chunked_docs) / len(cleaned_documents) if cleaned_documents else 0
+                    logger.info(f"Enhanced chunking: Generated {len(processed_docs)} chunks from {len(cleaned_documents)} cleaned documents (avg: {avg_chunks_per_doc:.2f} chunks/doc)")
+                else:
+                    logger.warning("Enhanced chunking timed out or failed, falling back to traditional processing")
+                    return self._process_documents_traditional(documents)
             else:
                 logger.warning("No cleaned documents available for enhanced chunking")
             
@@ -201,6 +207,45 @@ class TextProcessor:
             logger.error(f"Error in enhanced processing: {str(e)}")
             logger.info("Falling back to traditional processing due to enhanced chunking error")
             return self._process_documents_traditional(documents)
+    
+    def _chunk_documents_with_timeout(self, documents: List[Document], timeout_seconds: int = 60) -> Optional[List[Document]]:
+        """
+        Chunk documents with timeout protection to prevent infinite loops.
+        
+        Args:
+            documents: List of documents to chunk
+            timeout_seconds: Maximum time to spend on chunking
+            
+        Returns:
+            List of chunked documents or None if timeout
+        """
+        import threading
+        import time
+        
+        result = [None]
+        error = [None]
+        
+        def chunk_documents():
+            try:
+                result[0] = self.chunking_factory.chunk_documents(documents)
+            except Exception as e:
+                error[0] = e
+        
+        # Run chunking in a separate thread with timeout
+        thread = threading.Thread(target=chunk_documents)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=timeout_seconds)
+        
+        if thread.is_alive():
+            logger.warning(f"Chunking timeout after {timeout_seconds} seconds")
+            return None
+        
+        if error[0]:
+            logger.error(f"Chunking error: {error[0]}")
+            return None
+            
+        return result[0]
     
     def _process_documents_traditional(self, documents: List[Document]) -> List[Document]:
         """Process documents using traditional recursive character splitting."""

@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     llm_api_base_url: Optional[str] = None  # Base URL for LLM API (useful for ollama)
     
     # Embedding Configuration
+    embedding_provider: str = "openai"  # Options: openai, gemini, azure_openai, ollama
     embedding_model: str = "text-embedding-ada-002"  # Embedding model name
     embedding_api_base_url: Optional[str] = None  # Base URL for embedding API
     embedding_api_key: Optional[str] = None

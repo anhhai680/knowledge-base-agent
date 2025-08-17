@@ -8,7 +8,14 @@ This is the MVP implementation of the Knowledge Base Agent that can:
 """
 
 import os
+import sys
 import uvicorn
+
+# Add the current directory to Python path to ensure imports work in Docker
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 from src.config.settings import settings
 from src.utils.logging import setup_logging, get_logger
 

@@ -11,8 +11,8 @@ from .base_chunker import BaseChunker, ChunkMetadata
 from .parsers.javascript_parser import JavaScriptAdvancedParser
 from .parsers.semantic_element import SemanticElement, ElementType, ParseResult
 from .parsers.advanced_parser import FallbackError, AdvancedParserError
-from utils.logging import get_logger
-from src.config.settings import settings
+from ...utils.logging import get_logger
+from ...config.settings import settings
 
 logger = get_logger(__name__)
 
