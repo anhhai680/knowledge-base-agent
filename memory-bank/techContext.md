@@ -210,7 +210,7 @@ max_tokens: int = 4000              # Response length limit
 ```python
 embedding_model: str = "text-embedding-ada-002"  # Embedding model
 embedding_api_base_url: Optional[str]            # Custom embedding endpoint
-embedding_api_key: Optional[str]                 # Enhanced API key management
+embedding_api_key: Optional[str]                 # API key used exclusively for embedding model access (separate from LLM API keys); set this when embedding provider requires a distinct credential.
 ```
 
 **Processing Configuration:**
