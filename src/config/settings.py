@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 from pydantic import validator
 from typing import List, Optional
 import os
+from pathlib import Path
 
 class Settings(BaseSettings):
     # LLM Configuration
@@ -67,6 +68,12 @@ class Settings(BaseSettings):
     # Application Settings
     app_env: str = "development"
     log_level: str = "INFO"
+
+    # LangGraph Configuration
+    enable_langgraph: bool = False  # Will be overridden by ENABLE_LANGGRAPH env var
+    langgraph_default_system: str = "auto"  # Options: langchain, langgraph, auto
+    langgraph_migration_rollout: float = 0.0  # Percentage of traffic to route to LangGraph (0.0 to 1.0)
+    langgraph_enable_ab_testing: bool = False  # Enable A/B testing between systems
     
     @validator('llm_provider', 'llm_model', 'embedding_model', pre=True)
     def strip_comments(cls, v):
@@ -78,6 +85,52 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
 
 # Global settings instance
 settings = Settings()
+
+# Debug: Print environment variable values after loading
+print(f"🔧 Settings loaded - ENABLE_LANGGRAPH: {os.getenv('ENABLE_LANGGRAPH', 'NOT_SET')}")
+print(f"🔧 Settings loaded - settings.enable_langgraph: {settings.enable_langgraph}")
+
+# Container-specific environment variable handling
+def get_container_env_var(var_name: str, default: str = None) -> str:
+    """Get environment variable with container-specific fallbacks"""
+    # Try direct environment variable first
+    value = os.getenv(var_name)
+    if value is not None:
+        return value
+    
+    # Try with different casing (some containers are case-sensitive)
+    value = os.getenv(var_name.upper())
+    if value is not None:
+        return value
+    
+    # Try with different casing
+    value = os.getenv(var_name.lower())
+    if value is not None:
+        return value
+    
+    # Return default if nothing found
+    return default
+
+# Override settings if environment variables are set
+if get_container_env_var('ENABLE_LANGGRAPH'):
+    settings.enable_langgraph = get_container_env_var('ENABLE_LANGGRAPH', 'false').lower() == 'true'
+    print(f"🔧 Override: settings.enable_langgraph = {settings.enable_langgraph}")
+
+if get_container_env_var('LANGGRAPH_DEFAULT_SYSTEM'):
+    settings.langgraph_default_system = get_container_env_var('LANGGRAPH_DEFAULT_SYSTEM', 'auto')
+    print(f"🔧 Override: settings.langgraph_default_system = {settings.langgraph_default_system}")
+
+if get_container_env_var('LANGGRAPH_MIGRATION_ROLLOUT'):
+    try:
+        settings.langgraph_migration_rollout = float(get_container_env_var('LANGGRAPH_MIGRATION_ROLLOUT', '0.0'))
+        print(f"🔧 Override: settings.langgraph_migration_rollout = {settings.langgraph_migration_rollout}")
+    except ValueError:
+        print(f"⚠️ Invalid LANGGRAPH_MIGRATION_ROLLOUT value: {get_container_env_var('LANGGRAPH_MIGRATION_ROLLOUT')}")
+
+if get_container_env_var('LANGGRAPH_ENABLE_AB_TESTING'):
+    settings.langgraph_enable_ab_testing = get_container_env_var('LANGGRAPH_ENABLE_AB_TESTING', 'false').lower() == 'true'
+    print(f"🔧 Override: settings.langgraph_enable_ab_testing = {settings.langgraph_enable_ab_testing}")
