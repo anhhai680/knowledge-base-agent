@@ -108,7 +108,8 @@ def create_knowledge_base_agent_router():
 
 ### 2. AI Model Integration Compliance
 **Rule**: Follow company policy for AI model connections
-**Rationale**: Company policy disallows direct connections to AI models without approval
+**Rule**: Only connect to AI models using approved project integrations and guidelines
+**Rationale**: Direct connections to AI models should be avoided unless explicitly approved by project maintainers or documented in project guidelines
 **Implementation**:
 - **Use GitHub Copilot agent** for all AI-assisted development
 - **No direct API calls** to external AI models
