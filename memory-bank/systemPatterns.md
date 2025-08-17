@@ -81,7 +81,7 @@ flowchart TD
 
 ## Core Design Patterns
 
-### 1. Agent Router Pattern for Dual-Mode Responses
+### 1. Agent Router Pattern for Dual-Mode Responses ✅ IMPLEMENTED
 
 The system uses an intelligent agent router to automatically detect user intent and route queries to appropriate specialized agents, enabling both text and visual responses from a single endpoint.
 
@@ -100,8 +100,11 @@ def route_query(self, question: str) -> Dict[str, Any]:
 - **Intelligent Classification**: 12+ regex patterns detect diagram requests vs text queries
 - **Backward Compatibility**: Existing queries work exactly as before
 - **Extensible**: Easy to add new specialized agents for different response types
+- **Production Ready**: Successfully deployed and operational
 
-### 2. Factory Pattern for LLM Abstraction
+**Implementation Status**: ✅ **COMPLETED AND INTEGRATED** - Fully operational in production
+
+### 2. Factory Pattern for LLM Abstraction ✅ IMPLEMENTED
 
 The system uses factory patterns to abstract LLM and embedding model selection, allowing runtime switching between providers without code changes.
 
@@ -120,8 +123,11 @@ llm = LLMFactory.create_llm(
 - **Runtime Switching**: Change models via configuration without code changes
 - **Fallback Support**: Graceful degradation when primary models fail
 - **Cost Optimization**: Automatically select cost-effective models for simple queries
+- **Enhanced Validation**: Improved configuration validation and error reporting
 
-### 3. Repository-Based Data Loading
+**Implementation Status**: ✅ **COMPLETED AND ENHANCED** - Enhanced with better error handling
+
+### 3. Repository-Based Data Loading ✅ IMPLEMENTED
 
 GitHub repositories are processed using a specialized loader that understands code structure and preserves important metadata.
 
@@ -147,9 +153,12 @@ processed_docs = TextProcessor.process_documents(
 - `file_path`: Full file path within repository
 - `file_type`: Programming language/file type
 - `chunk_index`: Position within file for reconstruction
-- `commit_sha`: Git commit reference for version tracking
+- `commit_sha`: Git commit reference for versioning
+- `original_file_count`: Count of original files (enhanced tracking)
 
-### 4. Vector Store Abstraction
+**Implementation Status**: ✅ **COMPLETED AND ENHANCED** - Improved document tracking and metadata management
+
+### 4. Vector Store Abstraction ✅ IMPLEMENTED
 
 The vector store layer provides a consistent interface while supporting different backends and handling dimension compatibility automatically.
 
@@ -170,7 +179,9 @@ results = vector_store.similarity_search(
 )
 ```
 
-### 5. Chain-of-Thought RAG Processing
+**Implementation Status**: ✅ **COMPLETED AND ENHANCED** - Enhanced error handling and metadata management
+
+### 5. Chain-of-Thought RAG Processing ✅ IMPLEMENTED
 
 The RAG agent uses a structured approach to query processing that mirrors human problem-solving patterns.
 
@@ -194,9 +205,11 @@ def process_query(self, question: str) -> Dict[str, Any]:
     return self._format_response_with_sources(response, documents)
 ```
 
+**Implementation Status**: ✅ **COMPLETED AND ENHANCED** - Enhanced error handling and performance optimization
+
 ## Key Architectural Decisions
 
-### 1. Stateless API Design
+### 1. Stateless API Design ✅ IMPLEMENTED
 
 **Decision**: REST API with stateless request/response pattern
 **Rationale**: Enables horizontal scaling and simplifies deployment
@@ -204,8 +217,11 @@ def process_query(self, question: str) -> Dict[str, Any]:
 - No session state stored on server
 - All context passed in request parameters
 - Conversation history managed client-side
+- Enhanced error handling and recovery
 
-### 2. Pluggable LLM Architecture
+**Status**: ✅ **COMPLETED AND OPERATIONAL**
+
+### 2. Pluggable LLM Architecture ✅ IMPLEMENTED
 
 **Decision**: Factory pattern with provider abstraction
 **Rationale**: Avoid vendor lock-in and enable cost optimization
@@ -213,8 +229,11 @@ def process_query(self, question: str) -> Dict[str, Any]:
 - Common interface for all LLM providers
 - Configuration-driven provider selection
 - Automatic fallback and retry logic
+- Enhanced configuration validation
 
-### 3. Code-Aware Text Processing
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+### 3. Code-Aware Text Processing ✅ IMPLEMENTED
 
 **Decision**: Specialized chunking for code files
 **Rationale**: Preserve semantic meaning of code structures
@@ -222,8 +241,11 @@ def process_query(self, question: str) -> Dict[str, Any]:
 - Language-specific parsing and chunking
 - Import/dependency preservation
 - Function and class boundary awareness
+- Enhanced timeout handling and error recovery
 
-### 4. Persistent Vector Storage
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+### 4. Persistent Vector Storage ✅ IMPLEMENTED
 
 **Decision**: ChromaDB with Docker volume persistence
 **Rationale**: Fast startup without re-indexing, data safety
@@ -231,8 +253,11 @@ def process_query(self, question: str) -> Dict[str, Any]:
 - Automatic persistence verification
 - Dimension compatibility checking
 - Incremental updates for changed repositories
+- Enhanced metadata management and filtering
 
-### 5. Multi-Model Embedding Strategy
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+### 5. Multi-Model Embedding Strategy ✅ IMPLEMENTED
 
 **Decision**: Support multiple embedding providers with automatic migration
 **Rationale**: Optimize for different use cases and costs
@@ -240,6 +265,9 @@ def process_query(self, question: str) -> Dict[str, Any]:
 - Dimension compatibility validation
 - Automatic collection migration when needed
 - Performance benchmarking across models
+- Enhanced API key management
+
+**Status**: ✅ **COMPLETED AND ENHANCED**
 
 ## Component Relationships
 
@@ -273,10 +301,19 @@ flowchart LR
 
 **Query Flow:**
 1. API receives user question
-2. RAGAgent retrieves relevant document chunks
-3. LLMFactory generates response using retrieved context
-4. RAGAgent formats response with source attribution
-5. API returns structured response with sources
+2. AgentRouter determines query type (text vs diagram)
+3. RAGAgent or DiagramHandler processes query
+4. LLMFactory generates response using retrieved context
+5. Response formatted with source attribution
+6. API returns structured response (text + optional diagram)
+
+**Enhanced Diagram Flow:**
+1. AgentRouter detects diagram request
+2. DiagramHandler retrieves relevant code snippets
+3. SequenceDetector analyzes code interactions
+4. LLM generates Mermaid sequence diagram
+5. Response includes both text and diagram code
+6. Web interface renders diagram using Mermaid.js
 
 ### Error Handling Patterns
 
@@ -284,86 +321,185 @@ flowchart LR
 - LLM provider failures fall back to alternative providers
 - Embedding model failures use cached or alternative embeddings
 - Vector store connection issues use read-only mode when possible
+- Diagram generation failures fall back to text responses
 
 **User-Friendly Error Messages:**
 - Configuration errors include specific setup guidance
 - API errors provide actionable troubleshooting steps
 - Model compatibility issues suggest automatic fixes
+- Enhanced error recovery mechanisms
 
 ## Performance Patterns
 
-### 1. Lazy Loading and Caching
+### 1. Lazy Loading and Caching ✅ IMPLEMENTED
 
 **Pattern**: Load expensive resources only when needed and cache aggressively
 **Implementation**:
 - LLM models initialized on first use
 - Embedding functions cached after first creation
 - Vector store connections pooled and reused
+- Enhanced timeout handling for long-running operations
 
-### 2. Asynchronous Processing
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+### 2. Asynchronous Processing ✅ IMPLEMENTED
 
 **Pattern**: Use background tasks for long-running operations
 **Implementation**:
 - Repository indexing runs in background tasks
 - Multiple repositories can be indexed concurrently
 - Progress tracking via API status endpoints
+- Enhanced error handling for background operations
 
-### 3. Efficient Chunking and Retrieval
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+### 3. Efficient Chunking and Retrieval ✅ IMPLEMENTED
 
 **Pattern**: Optimize chunk size and retrieval strategy for code content
 **Implementation**:
 - Code-aware chunking preserves function/class boundaries
 - Configurable chunk overlap for context preservation
 - Smart retrieval count based on query complexity
+- Enhanced chunking strategies for different file types
+
+**Status**: ✅ **COMPLETED AND ENHANCED**
 
 ## Security Patterns
 
-### 1. API Key Management
+### 1. API Key Management ✅ IMPLEMENTED
 
 **Pattern**: Secure handling of multiple API providers
 **Implementation**:
 - Environment variable configuration only
 - No API keys logged or exposed in responses
 - Optional API key rotation support
+- Enhanced configuration validation
 
-### 2. GitHub Access Control
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+### 2. GitHub Access Control ✅ IMPLEMENTED
 
 **Pattern**: Respect repository access permissions
 **Implementation**:
 - User-provided GitHub tokens for private repositories
 - No persistent storage of GitHub credentials
 - Repository access validation before indexing
+- Enhanced error handling for access issues
 
-### 3. Input Validation and Sanitization
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+### 3. Input Validation and Sanitization ✅ IMPLEMENTED
 
 **Pattern**: Validate all user inputs and sanitize for LLM processing
 **Implementation**:
 - Pydantic models for request validation
 - Query sanitization to prevent prompt injection
 - File type filtering for safe document processing
+- Enhanced validation and error reporting
+
+**Status**: ✅ **COMPLETED AND ENHANCED**
 
 ## Monitoring and Observability Patterns
 
-### 1. Structured Logging
+### 1. Structured Logging ✅ IMPLEMENTED
 
 **Pattern**: Comprehensive logging with structured data
 **Implementation**:
 - JSON-formatted logs for easy parsing
 - Request tracing across components
 - Performance metrics and timing data
+- Enhanced error logging and recovery tracking
 
-### 2. Health Checks and Status Monitoring
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+### 2. Health Checks and Status Monitoring ✅ IMPLEMENTED
 
 **Pattern**: Multi-level health checking for dependencies
 **Implementation**:
 - API health endpoints for external monitoring
 - Component-level health checks (LLM, vector store, etc.)
 - Dependency status validation
+- Enhanced error reporting and recovery
 
-### 3. Configuration Visibility
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+### 3. Configuration Visibility ✅ IMPLEMENTED
 
 **Pattern**: Runtime configuration inspection and validation
 **Implementation**:
 - Configuration summary endpoints
 - Model compatibility status reporting
 - Performance and cost tracking per provider
+- Enhanced validation and error reporting
+
+**Status**: ✅ **COMPLETED AND ENHANCED**
+
+## Recent Architectural Enhancements
+
+### 1. Enhanced Error Handling ✅ IMPLEMENTED
+
+**Pattern**: Comprehensive error handling with graceful recovery
+**Implementation**:
+- Enhanced error handling in RAG agent and ChromaStore
+- Better error recovery mechanisms
+- User-friendly error messages
+- Improved timeout handling for long operations
+
+**Status**: ✅ **COMPLETED AND OPERATIONAL**
+
+### 2. Enhanced Document Tracking ✅ IMPLEMENTED
+
+**Pattern**: Improved metadata management and document counting
+**Implementation**:
+- Better tracking of original files vs processed chunks
+- Enhanced metadata filtering and management
+- Improved re-indexing capabilities
+- Better document count accuracy
+
+**Status**: ✅ **COMPLETED AND OPERATIONAL**
+
+### 3. Enhanced Chunking Strategies ✅ IMPLEMENTED
+
+**Pattern**: Optimized chunking for different file types
+**Implementation**:
+- Enhanced chunking configuration with timeout handling
+- Improved file pattern handling and logging
+- Better performance for large repositories
+- Enhanced error recovery in chunking processes
+
+**Status**: ✅ **COMPLETED AND OPERATIONAL**
+
+## Future Architectural Considerations
+
+### 1. Performance Monitoring Implementation (Next Priority)
+**Pattern**: Comprehensive system observability and metrics
+**Planned Implementation**:
+- Response time metrics for both text and diagram responses
+- Diagram generation success rate tracking
+- User query pattern analysis
+- System resource usage monitoring
+- Performance dashboard and alerting
+
+**Status**: 📋 **PLANNED** - Next development priority
+
+### 2. Advanced Query Features (Future)
+**Pattern**: Enhanced query capabilities and conversation management
+**Planned Implementation**:
+- Multi-repository comparative sequence diagrams
+- Query refinement and follow-up questions
+- Diagram export capabilities
+- Query history and bookmarking
+
+**Status**: 📋 **PLANNED** - Future development phase
+
+### 3. Integration Tools (Future)
+**Pattern**: Developer workflow integrations
+**Planned Implementation**:
+- VS Code extension with diagram preview
+- CLI tool with diagram generation
+- GitHub Actions integration
+- Slack/Teams bot with diagram capabilities
+
+**Status**: 📋 **PLANNED** - Future development phase
+
+The system architecture has successfully evolved to support comprehensive dual-mode responses (text + diagrams) while maintaining all existing functionality. The recent enhancements in error handling, document tracking, and chunking strategies have significantly improved system reliability and performance. The architecture is now ready for the next phase of advanced features and developer tool integrations.
