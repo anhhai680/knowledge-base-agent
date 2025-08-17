@@ -221,6 +221,34 @@ use_enhanced_chunking: bool = True  # Enhanced chunking strategies
 chunking_config_path: Optional[str] # Custom chunking configuration
 ```
 
+> **Custom Chunking Configuration File**
+>
+> The file specified by `chunking_config_path` should be in **YAML** or **JSON** format. It defines how documents are split into chunks for processing. The configuration may include:
+> - `chunk_size`: (int) Number of characters or tokens per chunk.
+> - `chunk_overlap`: (int) Number of overlapping characters/tokens between chunks.
+> - `strategy`: (str) Chunking strategy, e.g., `"sentence"`, `"paragraph"`, `"token"`.
+> - `min_chunk_size`: (int, optional) Minimum allowed chunk size.
+> - `max_chunk_size`: (int, optional) Maximum allowed chunk size.
+>
+> **Example (YAML):**
+> ```yaml
+> chunk_size: 1000
+> chunk_overlap: 200
+> strategy: sentence
+> min_chunk_size: 500
+> max_chunk_size: 1500
+> ```
+>
+> **Example (JSON):**
+> ```json
+> {
+>   "chunk_size": 1000,
+>   "chunk_overlap": 200,
+>   "strategy": "sentence",
+>   "min_chunk_size": 500,
+>   "max_chunk_size": 1500
+> }
+> ```
 **Storage Configuration:**
 ```python
 chroma_host: str = "localhost"      # Vector DB host
