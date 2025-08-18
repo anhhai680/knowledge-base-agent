@@ -96,7 +96,7 @@ class AdvancedParser(ABC):
                 raise AdvancedParserError("Failed to load tree-sitter language")
                 
             self._parser = ts.Parser()
-            self._parser.set_language(self._language)
+            self._parser.language = self._language
             logger.debug(f"Initialized tree-sitter parser for {self.language_name}")
             
         except Exception as e:
