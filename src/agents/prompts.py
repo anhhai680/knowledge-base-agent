@@ -39,6 +39,15 @@ CODE_FORMATTING_PROMPT = """
 ```language
 code example
 ```
+- Use the following format for architecture diagrams:
+```mermaid
+sequenceDiagram
+    participant User
+    participant System
+    User->>System: Question
+    System->>System: Process question
+    System->>User: Answer
+```
 """
 
 RESPONSE_STRUCTURE_PROMPT = """
