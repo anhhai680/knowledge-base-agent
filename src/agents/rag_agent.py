@@ -297,17 +297,26 @@ class RAGAgent:
                                        query_analysis: QueryAnalysis) -> Dict[str, Any]:
         """Generate response with reasoning transparency"""
         try:
-            # Use existing QA chain for response generation
-            if hasattr(self.qa_chain, '__call__'):
-                # Legacy RetrievalQA format
-                result = self.qa_chain({"query": question})
-                answer = result["result"]
-                source_docs = result.get("source_documents", [])
-            else:
-                # New chain format
-                result = self.qa_chain.invoke({"input": question})
-                answer = result["answer"]
-                source_docs = result.get("context", [])
+            # Use modern LangChain invoke method with correct input key for RetrievalQA
+            try:
+                result = self.qa_chain.invoke({"query": question})
+                answer = result.get("result", result.get("answer", ""))
+                source_docs = result.get("source_documents", result.get("context", []))
+            except (AttributeError, KeyError):
+                # Fallback for different chain formats
+                try:
+                    result = self.qa_chain.invoke({"input": question})
+                    answer = result.get("answer", result.get("result", ""))
+                    source_docs = result.get("context", result.get("source_documents", []))
+                except Exception as fallback_error:
+                    logger.warning(f"Chain invoke failed, trying legacy format: {str(fallback_error)}")
+                    # Last resort: try legacy format if available
+                    if hasattr(self.qa_chain, '__call__'):
+                        result = self.qa_chain({"query": question})
+                        answer = result.get("result", "")
+                        source_docs = result.get("source_documents", [])
+                    else:
+                        raise Exception("Unable to invoke QA chain with any supported method")
             
             # Add reasoning metadata
             response = {
@@ -447,15 +456,26 @@ class RAGAgent:
         logger.info("Falling back to basic query processing")
         
         try:
-            # Use original basic query method
-            if hasattr(self.qa_chain, '__call__'):
-                result = self.qa_chain({"query": question})
-                answer = result["result"]
-                source_docs = result.get("source_documents", [])
-            else:
-                result = self.qa_chain.invoke({"input": question})
-                answer = result["answer"]
-                source_docs = result.get("context", [])
+            # Use modern LangChain invoke method with correct input key for RetrievalQA
+            try:
+                result = self.qa_chain.invoke({"query": question})
+                answer = result.get("result", result.get("answer", ""))
+                source_docs = result.get("source_documents", result.get("context", []))
+            except (AttributeError, KeyError):
+                # Fallback for different chain formats
+                try:
+                    result = self.qa_chain.invoke({"input": question})
+                    answer = result.get("answer", result.get("result", ""))
+                    source_docs = result.get("context", result.get("source_documents", []))
+                except Exception as fallback_error:
+                    logger.warning(f"Chain invoke failed, trying legacy format: {str(fallback_error)}")
+                    # Last resort: try legacy format if available
+                    if hasattr(self.qa_chain, '__call__'):
+                        result = self.qa_chain({"query": question})
+                        answer = result.get("result", "")
+                        source_docs = result.get("source_documents", [])
+                    else:
+                        raise Exception("Unable to invoke QA chain with any supported method")
             
             # Format source documents
             formatted_docs = []
@@ -672,12 +692,16 @@ class ContextRefiner:
         context = initial_context
         self.last_iterations = 0
         
-        for iteration in range(self.config.max_refinement_iterations):
+        # Fix: Use dictionary access instead of attribute access
+        max_iterations = self.config.get("max_refinement_iterations", 3)
+        quality_threshold = self.config.get("quality_threshold", 0.8)
+        
+        for iteration in range(max_iterations):
             # Assess current context quality
             quality_score = self._assess_context_quality(context, question)
             self.last_quality_score = quality_score
             
-            if quality_score >= self.config.quality_threshold:
+            if quality_score >= quality_threshold:
                 break
             
             # Optimize context based on quality assessment
@@ -742,7 +766,10 @@ class ResponseEnhancer:
         """Enhance response quality through validation and improvement"""
         enhanced_response = response.copy()
         
-        for iteration in range(self.config.max_enhancement_iterations):
+        # Fix: Use dictionary access instead of attribute access
+        max_iterations = self.config.get("max_enhancement_iterations", 2)
+        
+        for iteration in range(max_iterations):
             # Validate current response quality
             validation_result = self._validate_response(enhanced_response, context, question)
             
