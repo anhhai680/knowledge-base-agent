@@ -14,6 +14,12 @@ class QueryResponse(BaseModel):
     # Extended fields for diagram responses
     mermaid_code: Optional[str] = None
     diagram_type: Optional[str] = None
+    
+    # New enhancement fields for advanced RAG
+    reasoning_steps: Optional[List[str]] = None
+    query_analysis: Optional[Dict[str, Any]] = None
+    context_quality_score: Optional[float] = None
+    enhancement_iterations: Optional[int] = None
 
 class IndexRequest(BaseModel):
     repository_urls: List[str]
