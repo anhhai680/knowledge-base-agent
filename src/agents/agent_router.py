@@ -36,33 +36,21 @@ class AgentRouter:
         return self.rag_agent.process_query(question)
     
     def _compile_diagram_patterns(self) -> List[re.Pattern]:
-        """Pre-compile regex patterns for diagram detection"""
+        """Pre-compile regex patterns for diagram detection with improved mermaid support"""
         patterns = [
             # Direct diagram requests
-            re.compile(r'\\b(?:sequence|flow|interaction)\\s+diagram\\b', re.IGNORECASE),
-            re.compile(r'\\bgenerate\\s+(?:a\\s+)?(?:sequence|flow|mermaid)\\b', re.IGNORECASE),
-            re.compile(r'\\bcreate\\s+(?:a\\s+)?(?:sequence|flow|diagram)\\b', re.IGNORECASE),
-            re.compile(r'\\bshow\\s+(?:me\\s+)?(?:a\\s+)?(?:sequence|flow|diagram)\\b', re.IGNORECASE),
-            
-            # Visualization requests  
-            re.compile(r'\\bvisuali[sz]e\\s+(?:how|the)\\b', re.IGNORECASE),
-            re.compile(r'\\bmap\\s+out\\s+the\\b', re.IGNORECASE),
-            re.compile(r'\\bdisplay\\s+the\\s+interaction\\b', re.IGNORECASE),
-            
-            # Flow analysis requests
-            re.compile(r'\\bhow\\s+does\\s+.*\\s+flow\\s+work', re.IGNORECASE),
-            re.compile(r'\\bwhat.*\\s+(?:call\\s+)?sequence\\b', re.IGNORECASE),
-            re.compile(r'\\bwalk\\s+me\\s+through\\s+the.*flow\\b', re.IGNORECASE),
-            
-            # Mermaid-specific requests
-            re.compile(r'\\bmermaid\\s+(?:code|diagram|syntax)\\b', re.IGNORECASE),
             re.compile(r'\b(?:sequence|flow|interaction)\s+diagram\b', re.IGNORECASE),
-            re.compile(r'\bgenerate\s+(?:a\s+)?(?:sequence|flow|mermaid)\b', re.IGNORECASE),
-            re.compile(r'\bcreate\s+(?:a\s+)?(?:sequence|flow|diagram)\b', re.IGNORECASE),
+            re.compile(r'\bgenerate\s+(?:a\s+)?(?:sequence|flow|mermaid|diagram)\b', re.IGNORECASE),
+            re.compile(r'\bcreate\s+(?:a\s+)?(?:sequence|flow|diagram|mermaid)\b', re.IGNORECASE),
             re.compile(r'\bshow\s+(?:me\s+)?(?:a\s+)?(?:sequence|flow|diagram)\b', re.IGNORECASE),
             
+            # Enhanced mermaid-specific requests
+            re.compile(r'\bmermaid\s+(?:code|diagram|syntax|sequence|flow)\b', re.IGNORECASE),
+            re.compile(r'\b(?:sequence|flow)\s+in\s+mermaid\b', re.IGNORECASE),
+            re.compile(r'\bdraw\s+(?:a\s+)?(?:sequence|flow)\s+(?:with\s+)?mermaid\b', re.IGNORECASE),
+            
             # Visualization requests  
-            re.compile(r'\bvisuali[sz]e\s+(?:how|the)\b', re.IGNORECASE),
+            re.compile(r'\bvisuali[sz]e\s+(?:how|the|as)\b', re.IGNORECASE),
             re.compile(r'\bmap\s+out\s+the\b', re.IGNORECASE),
             re.compile(r'\bdisplay\s+the\s+interaction\b', re.IGNORECASE),
             
@@ -71,43 +59,54 @@ class AgentRouter:
             re.compile(r'\bwhat.*\s+(?:call\s+)?sequence\b', re.IGNORECASE),
             re.compile(r'\bwalk\s+me\s+through\s+the.*flow\b', re.IGNORECASE),
             
-            # Mermaid-specific requests
-            re.compile(r'\bmermaid\s+(?:code|diagram|syntax)\b', re.IGNORECASE),
-            re.compile(r'\bgenerate\s+mermaid\b', re.IGNORECASE),
+            # Code structure visualization
+            re.compile(r'\b(?:class|method|function)\s+interaction\b', re.IGNORECASE),
+            re.compile(r'\b(?:service|api|endpoint)\s+flow\b', re.IGNORECASE),
+            re.compile(r'\b(?:data|request)\s+flow\b', re.IGNORECASE),
         ]
         return patterns
     
     def _is_diagram_request(self, question: str) -> bool:
-        """Enhanced diagram request detection using multiple strategies"""
+        """Enhanced diagram request detection with improved mermaid support"""
         
         # Strategy 1: Pre-compiled regex patterns
         for pattern in self._diagram_patterns:
             if pattern.search(question):
                 return True
         
-        # Strategy 2: Keyword combination analysis
+        # Strategy 2: Enhanced keyword combination analysis
         question_lower = question.lower()
         
-        # Direct keywords
+        # Direct keywords with mermaid emphasis
         direct_keywords = [
             'sequence diagram', 'flow diagram', 'interaction diagram',
             'mermaid', 'visualize', 'diagram', 'sequence', 'flow'
         ]
         
+        # Mermaid-specific indicators
+        mermaid_indicators = [
+            'mermaid code', 'mermaid syntax', 'mermaid diagram',
+            'sequence in mermaid', 'flow in mermaid'
+        ]
+        
         # Context keywords that strengthen diagram intent
         context_keywords = [
             'show', 'generate', 'create', 'display', 'map out',
-            'walk through', 'interaction', 'call', 'process'
+            'walk through', 'interaction', 'call', 'process', 'draw'
         ]
         
         # Flow-related phrases
         flow_phrases = [
             'how does', 'what happens when', 'walk me through',
-            'show me how', 'explain the flow', 'interaction between'
+            'show me how', 'explain the flow', 'interaction between',
+            'step by step', 'workflow', 'process flow'
         ]
         
         # Check for direct keywords
         has_direct_keyword = any(keyword in question_lower for keyword in direct_keywords)
+        
+        # Check for mermaid-specific requests
+        has_mermaid_request = any(indicator in question_lower for indicator in mermaid_indicators)
         
         # Check for flow phrases
         has_flow_phrase = any(phrase in question_lower for phrase in flow_phrases)
@@ -115,18 +114,20 @@ class AgentRouter:
         # Check for context + visualization intent
         has_context = any(keyword in question_lower for keyword in context_keywords)
         has_visualization_intent = any(word in question_lower for word in [
-            'interaction', 'sequence', 'flow', 'process', 'steps'
+            'interaction', 'sequence', 'flow', 'process', 'steps', 'workflow'
         ])
         
-        # Decision logic
+        # Decision logic with mermaid priority
+        if has_mermaid_request:
+            return True
         if has_direct_keyword:
             return True
         if has_flow_phrase and has_visualization_intent:
             return True
-        if has_context and has_visualization_intent and 'flow' in question_lower:
+        if has_context and has_visualization_intent and ('flow' in question_lower or 'sequence' in question_lower):
             return True
 
-        logger.debug(f"Request detected in: {question} with context: {has_context}, flow: {has_flow_phrase}, visualization: {has_visualization_intent}")
+        logger.debug(f"Request analysis: {question} | mermaid: {has_mermaid_request}, direct: {has_direct_keyword}, flow: {has_flow_phrase}, context: {has_context}, visualization: {has_visualization_intent}")
 
         return False
     
@@ -216,19 +217,28 @@ class AgentRouter:
             }
     
     def _generate_diagram_response(self, query: str) -> Dict[str, Any]:
-        """Generate diagram and format as standard query response"""
+        """Generate diagram with enhanced mermaid support and response quality"""
         try:
+            # Check if this is a mermaid-specific request
+            is_mermaid_request = self._is_mermaid_specific_request(query)
+            
             # Generate diagram using DiagramHandler
             diagram_result = self.diagram_handler.generate_sequence_diagram(query)
             
+            # Enhance response for mermaid requests
+            if is_mermaid_request and diagram_result.get("mermaid_code"):
+                enhanced_answer = self._enhance_mermaid_response(diagram_result, query)
+            else:
+                enhanced_answer = diagram_result.get("analysis_summary", "Generated sequence diagram")
+            
             # Format as standard QueryResponse with mermaid_code extension
             return {
-                "answer": diagram_result.get("analysis_summary", "Generated sequence diagram"),
+                "answer": enhanced_answer,
                 "source_documents": diagram_result.get("source_documents", []),
                 "status": diagram_result.get("status", "success"),
                 "num_sources": len(diagram_result.get("source_documents", [])),
-                "mermaid_code": diagram_result.get("mermaid_code"),  # Extended field
-                "diagram_type": "sequence"  # Extended field
+                "mermaid_code": diagram_result.get("mermaid_code"),
+                "diagram_type": "sequence"
             }
             
         except Exception as e:
@@ -242,3 +252,41 @@ class AgentRouter:
                 "mermaid_code": None,
                 "diagram_type": None
             }
+
+def _is_mermaid_specific_request(self, query: str) -> bool:
+    """Detect if the request specifically asks for mermaid format"""
+    mermaid_patterns = [
+        r'\bmermaid\b',
+        r'\b(?:sequence|flow)\s+in\s+mermaid\b',
+        r'\b(?:generate|create|show)\s+.*\s+mermaid\b'
+    ]
+    
+    query_lower = query.lower()
+    return any(re.search(pattern, query_lower, re.IGNORECASE) for pattern in mermaid_patterns)
+
+def _enhance_mermaid_response(self, diagram_result: Dict[str, Any], query: str) -> str:
+    """Enhance response for mermaid-specific requests"""
+    mermaid_code = diagram_result.get("mermaid_code", "")
+    analysis_summary = diagram_result.get("analysis_summary", "")
+    
+    if not mermaid_code:
+        return analysis_summary
+    
+    enhanced_response = f"""## Mermaid Sequence Diagram Generated
+
+{analysis_summary}
+
+### Mermaid Code
+```mermaid
+{mermaid_code}
+```
+
+### Usage Instructions
+1. **Copy the mermaid code** above
+2. **Paste into any mermaid-compatible editor** (GitHub, GitLab, Mermaid Live Editor)
+3. **Customize** the diagram as needed
+4. **Export** to PNG, SVG, or other formats
+
+💡 **Tip**: You can also use this in documentation, README files, or technical specifications."""
+    
+    return enhanced_response
