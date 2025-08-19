@@ -4,7 +4,7 @@ from langchain.prompts import PromptTemplate
 from langchain.docstore.document import Document
 from ..utils.logging import get_logger
 from .prompts import PromptComponents
-from .query_optimizer import AdvancedQueryOptimizer, QueryOptimizationResult
+from .query_optimizer import AdvancedQueryOptimizer, QueryOptimizationResult, OptimizationStrategy
 from .response_quality_enhancer import EnhancedResponseQualityEnhancer
 
 logger = get_logger(__name__)
@@ -211,13 +211,7 @@ class RAGAgent:
             return QueryOptimizationResult(
                 original_query=question,
                 optimized_queries=[question],
-                strategy_used=self.query_optimizer.strategy_selector.select_strategy(
-                    self.query_optimizer.semantic_analyzer.analyze_query(question)
-            # Use a static fallback strategy; replace 'DEFAULT' with an appropriate value if needed
-            return QueryOptimizationResult(
-                original_query=question,
-                optimized_queries=[question],
-                strategy_used=getattr(QueryOptimizationResult, "DEFAULT_STRATEGY", "default"),
+                strategy_used=OptimizationStrategy.REWRITING,
                 confidence_score=0.5,
                 reasoning=f"Optimization failed, using original query: {str(e)}",
                 metadata={"error": str(e)}
