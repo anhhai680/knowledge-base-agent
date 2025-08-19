@@ -33,7 +33,7 @@ class AgentRouter:
         
         # Default to RAG agent for regular queries
         logger.info(f"Routing to RAG agent: {question[:100]}...")
-        return self.rag_agent.query(question)
+        return self.rag_agent.process_query(question)
     
     def _compile_diagram_patterns(self) -> List[re.Pattern]:
         """Pre-compile regex patterns for diagram detection"""
