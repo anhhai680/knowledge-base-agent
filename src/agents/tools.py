@@ -7,9 +7,9 @@ for demonstration and testing purposes.
 
 from typing import Dict, Any, List, Optional
 from langchain.tools import BaseTool
-import json
 import re
 import math
+import ast
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -44,12 +44,29 @@ class SafeMathEvaluator:
             if char.isdigit() or char == '.':
                 # Number
                 current += char
-            elif char in self.allowed_operators or char in '()':
-                # Operator or parenthesis
+            elif char in '()':
+                # Parenthesis
                 if current:
                     tokens.append(current)
                     current = ""
                 tokens.append(char)
+            elif char == ',':
+                # Argument separator
+                if current:
+                    tokens.append(current)
+                    current = ""
+                tokens.append(',')
+            elif char in '+-*/%':
+                # Operator (handle multi-char operators ** and //)
+                if current:
+                    tokens.append(current)
+                    current = ""
+                # Peek next char for multi-character operators
+                if i + 1 < len(expr) and ((char == '*' and expr[i+1] == '*') or (char == '/' and expr[i+1] == '/')):
+                    tokens.append(char + expr[i+1])
+                    i += 1
+                else:
+                    tokens.append(char)
             elif char.isalpha():
                 # Function name or variable
                 current += char
@@ -67,7 +84,7 @@ class SafeMathEvaluator:
     def _validate_tokens(self, tokens: List[str]) -> bool:
         """Validate that tokens only contain safe mathematical operations"""
         for token in tokens:
-            if token in self.allowed_operators or token in '()':
+            if token in self.allowed_operators or token in '()' or token == ',':
                 continue
             elif token.replace('.', '').isdigit():
                 continue
@@ -271,6 +288,145 @@ class SafeMathEvaluator:
         except Exception as e:
             raise ValueError(f"Invalid mathematical expression: {str(e)}")
 
+class SafePythonEvaluator(ast.NodeVisitor):
+    """Safely evaluate a restricted subset of Python expressions.
+
+    Supported:
+    - Numeric operations (+, -, *, /, //, %, **)
+    - Parentheses and unary +/-
+    - Function calls to whitelisted names only (no attributes)
+    - Constants: numbers, strings, booleans, None
+    - Names that exist in the provided allowed names
+
+    Not supported:
+    - Attribute access (obj.attr)
+    - Subscripts (obj[idx]) and slicing
+    - Comprehensions, lambdas, generators
+    - Assignments, imports, control flow, statements
+    - Keyword arguments and starargs/kwargs
+    """
+
+    def __init__(self, allowed_names: Optional[Dict[str, Any]] = None) -> None:
+        self.allowed_names: Dict[str, Any] = allowed_names or {}
+
+    def visit_Expression(self, node: ast.Expression) -> Any:
+        return self.visit(node.body)
+
+    def visit_Constant(self, node: ast.Constant) -> Any:
+        return node.value
+
+    # Python <3.8 compatibility (Num, Str, NameConstant) is not required here
+
+    def visit_Name(self, node: ast.Name) -> Any:
+        if node.id in self.allowed_names:
+            return self.allowed_names[node.id]
+        raise ValueError(f"Use of name '{node.id}' is not allowed")
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
+        operand = self.visit(node.operand)
+        if isinstance(node.op, ast.UAdd):
+            return +operand
+        if isinstance(node.op, ast.USub):
+            return -operand
+        raise ValueError("Unsupported unary operator")
+
+    def visit_BinOp(self, node: ast.BinOp) -> Any:
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        if isinstance(node.op, ast.Add):
+            return left + right
+        if isinstance(node.op, ast.Sub):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            return left * right
+        if isinstance(node.op, ast.Div):
+            if right == 0:
+                raise ValueError("Division by zero")
+            return left / right
+        if isinstance(node.op, ast.FloorDiv):
+            if right == 0:
+                raise ValueError("Division by zero")
+            return left // right
+        if isinstance(node.op, ast.Mod):
+            if right == 0:
+                raise ValueError("Modulo by zero")
+            return left % right
+        if isinstance(node.op, ast.Pow):
+            return left ** right
+        raise ValueError("Unsupported binary operator")
+
+    def visit_Call(self, node: ast.Call) -> Any:
+        # Disallow attribute-based calls like module.func
+        if isinstance(node.func, ast.Attribute):
+            raise ValueError("Attribute access is not allowed")
+        func_obj = self.visit(node.func)
+        if not callable(func_obj):
+            raise ValueError("Attempted to call a non-callable object")
+        if node.keywords:
+            raise ValueError("Keyword arguments are not allowed")
+        if any(isinstance(arg, (ast.Starred)) for arg in node.args):
+            raise ValueError("Starred arguments are not allowed")
+        args = [self.visit(arg) for arg in node.args]
+        return func_obj(*args)
+
+    # Explicitly forbid everything else
+    def generic_visit(self, node: ast.AST) -> Any:
+        forbidden_nodes = (
+            ast.Attribute,
+            ast.Subscript,
+            ast.Slice,
+            ast.IfExp,
+            ast.ListComp,
+            ast.DictComp,
+            ast.SetComp,
+            ast.GeneratorExp,
+            ast.Lambda,
+            ast.List,
+            ast.Tuple,
+            ast.Dict,
+            ast.Set,
+            ast.Compare,
+            ast.BoolOp,
+            ast.Assign,
+            ast.AugAssign,
+            ast.AnnAssign,
+            ast.NamedExpr,
+            ast.Import,
+            ast.ImportFrom,
+            ast.For,
+            ast.While,
+            ast.If,
+            ast.With,
+            ast.Try,
+            ast.FunctionDef,
+            ast.ClassDef,
+            ast.Return,
+            ast.Delete,
+            ast.Global,
+            ast.Nonlocal,
+            ast.Yield,
+            ast.YieldFrom,
+            ast.Raise,
+            ast.Module,
+            ast.Expr,
+        )
+        if isinstance(node, forbidden_nodes):
+            raise ValueError("This Python construct is not allowed")
+        return super().generic_visit(node)
+
+    @staticmethod
+    def evaluate(expression: str, allowed_names: Optional[Dict[str, Any]] = None) -> Any:
+        # Only allow a single expression, reject statements or multiple lines
+        code = expression.strip()
+        if "\n" in code or ";" in code:
+            raise ValueError("Only single expressions are allowed")
+        try:
+            parsed = ast.parse(code, mode="eval")
+        except SyntaxError as exc:
+            raise ValueError(f"Invalid expression: {exc.msg}")
+        evaluator = SafePythonEvaluator(allowed_names)
+        return evaluator.visit(parsed)
+
 class SearchTool(BaseTool):
     """Basic search tool for demonstration"""
     
@@ -328,102 +484,54 @@ class CodeExecutionTool(BaseTool):
     description: str = "Execute simple Python code safely"
     
     def _run(self, code: str) -> str:
-        """Execute the code"""
-        logger.info(f"Executing code: {code[:100]}...")
-        
+        """Safely evaluate a restricted Python expression (no exec)."""
+        logger.info(f"Executing code expression: {code[:100]}...")
         try:
-            # Only allow safe operations
-            safe_globals = {
-                'print': print,
-                'len': len,
-                'str': str,
-                'int': int,
-                'float': float,
-                'list': list,
-                'dict': dict,
-                'set': set,
-                'tuple': tuple,
-                'range': range,
-                'sum': sum,
-                'min': min,
-                'max': max,
+            allowed: Dict[str, Any] = {
+                # Builtins
                 'abs': abs,
                 'round': round,
-                'sorted': sorted,
-                'reversed': reversed,
-                'enumerate': enumerate,
-                'zip': zip,
-                'map': map,
-                'filter': filter,
-                'any': any,
-                'all': all,
-                'bool': bool,
-                'chr': chr,
-                'ord': ord,
-                'hex': hex,
-                'oct': oct,
-                'bin': bin,
-                'format': format,
-                'repr': repr,
-                'ascii': ascii,
-                'hash': hash,
-                'id': id,
-                'type': type,
-                'isinstance': isinstance,
-                'issubclass': issubclass,
-                'callable': callable,
-                'getattr': getattr,
-                'hasattr': hasattr,
-                'setattr': setattr,
-                'delattr': delattr,
-                'property': property,
-                'super': super,
-                'object': object,
-                'Exception': Exception,
-                'ValueError': ValueError,
-                'TypeError': TypeError,
-                'AttributeError': AttributeError,
-                'IndexError': IndexError,
-                'KeyError': KeyError,
-                'RuntimeError': RuntimeError,
-                'OSError': OSError,
-                'FileNotFoundError': FileNotFoundError,
-                'PermissionError': PermissionError,
-                'TimeoutError': TimeoutError,
-                'ConnectionError': ConnectionError,
-                'BlockingIOError': BlockingIOError,
-                'ChildProcessError': ChildProcessError,
-                'BrokenPipeError': BrokenPipeError,
-                'ConnectionAbortedError': ConnectionAbortedError,
-                'ConnectionRefusedError': ConnectionRefusedError,
-                'ConnectionResetError': ConnectionResetError,
-                'FileExistsError': FileExistsError,
-                'FileNotFoundError': FileNotFoundError,
-                'InterruptedError': InterruptedError,
-                'IsADirectoryError': IsADirectoryError,
-                'NotADirectoryError': NotADirectoryError,
-                'PermissionError': PermissionError,
-                'ProcessLookupError': ProcessLookupError,
-                'TimeoutError': TimeoutError,
-                'UnsupportedOperation': OSError,
-                'math': math,
-                'json': json,
-                're': re
+                'min': min,
+                'max': max,
+                'sum': sum,
+                'pow': pow,
+                'True': True,
+                'False': False,
+                'None': None,
+                # Math constants and functions
+                'pi': math.pi,
+                'e': math.e,
+                'tau': getattr(math, 'tau', 6.283185307179586),
+                'inf': math.inf,
+                'nan': math.nan,
+                'sqrt': math.sqrt,
+                'sin': math.sin,
+                'cos': math.cos,
+                'tan': math.tan,
+                'asin': math.asin,
+                'acos': math.acos,
+                'atan': math.atan,
+                'sinh': math.sinh,
+                'cosh': math.cosh,
+                'tanh': math.tanh,
+                'asinh': math.asinh,
+                'acosh': math.acosh,
+                'atanh': math.atanh,
+                'log': math.log,
+                'log10': math.log10,
+                'exp': math.exp,
+                'floor': math.floor,
+                'ceil': math.ceil,
+                'trunc': math.trunc,
+                'factorial': math.factorial,
+                'gcd': math.gcd,
+                'lcm': getattr(math, 'lcm', lambda a, b: (a*b)//math.gcd(a,b) if a and b else 0),
             }
-            
-            safe_locals = {}
-            
-            # Execute the code
-            exec(code, safe_globals, safe_locals)
-            
-            # Return any output
-            if '_' in safe_locals:
-                return f"Code executed successfully. Result: {safe_locals['_']}"
-            else:
-                return "Code executed successfully."
-                
+
+            result = SafePythonEvaluator.evaluate(code, allowed)
+            return f"Result: {result}"
         except Exception as e:
-            return f"Error executing code: {str(e)}"
+            return f"Error executing expression: {str(e)}"
     
     def _arun(self, code: str) -> str:
         """Async version of the code execution"""
