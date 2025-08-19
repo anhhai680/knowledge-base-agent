@@ -253,26 +253,26 @@ class AgentRouter:
                 "diagram_type": None
             }
 
-def _is_mermaid_specific_request(self, query: str) -> bool:
-    """Detect if the request specifically asks for mermaid format"""
-    mermaid_patterns = [
-        r'\bmermaid\b',
-        r'\b(?:sequence|flow)\s+in\s+mermaid\b',
-        r'\b(?:generate|create|show)\s+.*\s+mermaid\b'
-    ]
-    
-    query_lower = query.lower()
-    return any(re.search(pattern, query_lower, re.IGNORECASE) for pattern in mermaid_patterns)
+    def _is_mermaid_specific_request(self, query: str) -> bool:
+        """Detect if the request specifically asks for mermaid format"""
+        mermaid_patterns = [
+            r'\bmermaid\b',
+            r'\b(?:sequence|flow)\s+in\s+mermaid\b',
+            r'\b(?:generate|create|show)\s+.*\s+mermaid\b'
+        ]
+        
+        query_lower = query.lower()
+        return any(re.search(pattern, query_lower, re.IGNORECASE) for pattern in mermaid_patterns)
 
-def _enhance_mermaid_response(self, diagram_result: Dict[str, Any], query: str) -> str:
-    """Enhance response for mermaid-specific requests"""
-    mermaid_code = diagram_result.get("mermaid_code", "")
-    analysis_summary = diagram_result.get("analysis_summary", "")
-    
-    if not mermaid_code:
-        return analysis_summary
-    
-    enhanced_response = f"""## Mermaid Sequence Diagram Generated
+    def _enhance_mermaid_response(self, diagram_result: Dict[str, Any], query: str) -> str:
+        """Enhance response for mermaid-specific requests"""
+        mermaid_code = diagram_result.get("mermaid_code", "")
+        analysis_summary = diagram_result.get("analysis_summary", "")
+        
+        if not mermaid_code:
+            return analysis_summary
+        
+        enhanced_response = f"""## Mermaid Sequence Diagram Generated
 
 {analysis_summary}
 
@@ -288,5 +288,5 @@ def _enhance_mermaid_response(self, diagram_result: Dict[str, Any], query: str) 
 4. **Export** to PNG, SVG, or other formats
 
 💡 **Tip**: You can also use this in documentation, README files, or technical specifications."""
-    
-    return enhanced_response
+        
+        return enhanced_response
