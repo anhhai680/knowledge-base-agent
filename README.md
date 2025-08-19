@@ -260,18 +260,10 @@ Once running, visit http://localhost:8000/docs for interactive API documentation
 
 - Python (`.py`)
 - JavaScript/TypeScript (`.js`, `.ts`, `.jsx`, `.tsx`)
-- Java (`.java`)
-- C/C++ (`.c`, `.cpp`, `.h`)
 - C# (`.cs`)
 - PHP (`.php`)
-- Ruby (`.rb`)
-- Go (`.go`)
-- Rust (`.rs`)
-- Swift (`.swift`)
-- Kotlin (`.kt`)
-- Scala (`.scala`)
-- Documentation (`.md`, `.txt`, `.rst`)
-- Configuration (`.yml`, `.yaml`, `.json`, `.xml`, `.sql`)
+- Documentation (`.md`, `.txt`)
+- Configuration (`.yml`, `.yaml`, `.json`)
 
 ## MVP Limitations
 
