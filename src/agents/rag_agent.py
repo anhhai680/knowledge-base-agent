@@ -4,6 +4,7 @@ from langchain.prompts import PromptTemplate
 from langchain.docstore.document import Document
 from ..utils.logging import get_logger
 from .prompts import PromptComponents
+from .query_optimizer import AdvancedQueryOptimizer, QueryOptimizationResult
 
 logger = get_logger(__name__)
 
@@ -35,6 +36,9 @@ class RAGAgent:
         self.query_analyzer = QueryAnalyzer(llm)
         self.context_refiner = ContextRefiner(llm, self.enhancement_config)
         self.response_enhancer = ResponseEnhancer(llm, self.enhancement_config)
+        
+        # Initialize advanced query optimizer
+        self.query_optimizer = AdvancedQueryOptimizer(llm, self.enhancement_config.get("query_optimization", {}))
         
     def _get_default_enhancement_config(self) -> Dict[str, Any]:
         """Get default enhancement configuration"""
@@ -89,33 +93,44 @@ class RAGAgent:
             raise
     
     def process_query(self, question: str) -> Dict[str, Any]:
-        """Enhanced query method with Chain-of-Thought reasoning"""
-        logger.info(f"Processing enhanced query: {question[:100]}...")
+        """Enhanced query method with Chain-of-Thought reasoning and advanced query optimization"""
+        logger.info(f"Processing enhanced query with optimization: {question[:100]}...")
         
         try:
-            # Step 1: Analyze query intent and complexity
-            query_analysis = self._analyze_query(question)
+            # Step 1: Advanced query optimization
+            optimization_result = self._optimize_query(question)
+            logger.info(f"Query optimization completed: strategy={optimization_result.strategy_used.value}, confidence={optimization_result.confidence_score:.2f}")
+            
+            # Step 2: Analyze optimized queries for intent and complexity
+            primary_query = optimization_result.optimized_queries[0]
+            query_analysis = self._analyze_query(primary_query)
             logger.info(f"Query analysis: intent={query_analysis.intent}, complexity={query_analysis.complexity}")
             
-            # Step 2: Build initial context with reasoning
-            initial_context = self._build_context_with_reasoning(question, query_analysis)
-            logger.info(f"Initial context built with {len(initial_context)} documents")
+            # Step 3: Build context using optimized queries
+            if len(optimization_result.optimized_queries) > 1:
+                # Use multi-query strategy for comprehensive retrieval
+                context = self._build_context_with_multi_queries(optimization_result.optimized_queries, query_analysis)
+            else:
+                # Use single optimized query
+                context = self._build_context_with_reasoning(primary_query, query_analysis)
             
-            # Step 3: Refine context iteratively
-            refined_context = self._refine_context(initial_context, question)
+            logger.info(f"Context built with {len(context)} documents using {len(optimization_result.optimized_queries)} queries")
+            
+            # Step 4: Refine context iteratively
+            refined_context = self._refine_context(context, primary_query)
             logger.info(f"Context refined to {len(refined_context)} documents")
             
-            # Step 4: Generate response with reasoning transparency
-            response = self._generate_response_with_reasoning(question, refined_context, query_analysis)
+            # Step 5: Generate response with reasoning transparency
+            response = self._generate_response_with_reasoning(primary_query, refined_context, query_analysis)
             
-            # Step 5: Validate and enhance response quality
-            enhanced_response = self._enhance_response_quality(response, refined_context, question)
+            # Step 6: Validate and enhance response quality
+            enhanced_response = self._enhance_response_quality(response, refined_context, primary_query)
             
-            # Format final response with enhancement metadata
-            return self._format_enhanced_response(enhanced_response, query_analysis, refined_context)
+            # Format final response with enhancement and optimization metadata
+            return self._format_enhanced_response_with_optimization(enhanced_response, query_analysis, refined_context, optimization_result)
             
         except Exception as e:
-            logger.error(f"Enhanced query failed: {str(e)}")
+            logger.error(f"Enhanced query with optimization failed: {str(e)}")
             return self._fallback_to_basic_query(question, e)
     
     def _analyze_query(self, question: str) -> QueryAnalysis:
@@ -167,6 +182,87 @@ class RAGAgent:
             base_kwargs["filter"] = {"file_path": {"$regex": ".*\\.(yml|yaml|json|toml|ini|conf)$"}}
         
         return base_kwargs
+    
+    def _optimize_query(self, question: str) -> QueryOptimizationResult:
+        """Optimize query using advanced optimization strategies"""
+        try:
+            # Get query optimization configuration
+            query_opt_config = self.enhancement_config.get("query_optimization", {})
+            
+            # Create context for optimization
+            optimization_context = {
+                "original_query": question,
+                "enhancement_config": self.enhancement_config
+            }
+            
+            # Perform query optimization
+            optimization_result = self.query_optimizer.optimize_query(question, optimization_context)
+            
+            logger.info(f"Query optimization completed: {len(optimization_result.optimized_queries)} queries, strategy: {optimization_result.strategy_used.value}")
+            return optimization_result
+            
+        except Exception as e:
+            logger.error(f"Query optimization failed: {str(e)}")
+            # Return fallback optimization result
+            return QueryOptimizationResult(
+                original_query=question,
+                optimized_queries=[question],
+                strategy_used=self.query_optimizer.strategy_selector.select_strategy(
+                    self.query_optimizer.semantic_analyzer.analyze_query(question)
+                ),
+                confidence_score=0.5,
+                reasoning=f"Optimization failed, using original query: {str(e)}",
+                metadata={"error": str(e)}
+            )
+    
+    def _build_context_with_multi_queries(self, queries: List[str], query_analysis: QueryAnalysis) -> List[Document]:
+        """Build context using multiple optimized queries for comprehensive retrieval"""
+        all_documents = []
+        
+        try:
+            for i, query in enumerate(queries):
+                logger.info(f"Processing query {i+1}/{len(queries)}: {query[:50]}...")
+                
+                # Get adaptive retrieval parameters for this query
+                retrieval_kwargs = self._get_adaptive_retrieval_kwargs(query_analysis)
+                
+                # Retrieve documents for this query
+                try:
+                    documents = self.vectorstore.similarity_search(query, **retrieval_kwargs)
+                    all_documents.extend(documents)
+                    logger.info(f"Retrieved {len(documents)} documents for query {i+1}")
+                except Exception as e:
+                    logger.warning(f"Failed to retrieve documents for query {i+1}: {str(e)}")
+                    continue
+            
+            # Remove duplicate documents based on content
+            unique_documents = self._deduplicate_documents(all_documents)
+            logger.info(f"Multi-query context built: {len(unique_documents)} unique documents from {len(queries)} queries")
+            
+            return unique_documents
+            
+        except Exception as e:
+            logger.error(f"Multi-query context building failed: {str(e)}")
+            # Fallback to single query
+            return self._build_context_with_reasoning(queries[0], query_analysis)
+    
+    def _deduplicate_documents(self, documents: List[Document]) -> List[Document]:
+        """Remove duplicate documents based on content similarity"""
+        if not documents:
+            return []
+        
+        unique_documents = []
+        seen_contents = set()
+        
+        for doc in documents:
+            # Create a content hash for deduplication
+            content_hash = hash(doc.page_content[:100])  # Use first 100 chars as hash
+            
+            if content_hash not in seen_contents:
+                unique_documents.append(doc)
+                seen_contents.add(content_hash)
+        
+        return unique_documents
     
     def _assess_document_relevance(self, doc: Document, question: str, query_analysis: QueryAnalysis) -> str:
         """Assess and explain document relevance to the query"""
@@ -280,6 +376,42 @@ class RAGAgent:
         except Exception as e:
             logger.error(f"Response formatting failed: {str(e)}")
             raise
+    
+    def _format_enhanced_response_with_optimization(self, response: Dict[str, Any], query_analysis: QueryAnalysis, 
+                                                  context: List[Document], optimization_result: QueryOptimizationResult) -> Dict[str, Any]:
+        """Format final response with enhancement and optimization metadata"""
+        try:
+            # Get base enhanced response
+            enhanced_response = self._format_enhanced_response(response, query_analysis, context)
+            
+            # Add optimization metadata
+            enhanced_response.update({
+                # Query optimization metadata
+                "query_optimization": {
+                    "original_query": optimization_result.original_query,
+                    "optimized_queries": optimization_result.optimized_queries,
+                    "strategy_used": optimization_result.strategy_used.value,
+                    "confidence_score": optimization_result.confidence_score,
+                    "reasoning": optimization_result.reasoning,
+                    "metadata": optimization_result.metadata
+                },
+                
+                # Enhanced context information
+                "context_metadata": {
+                    **enhanced_response.get("context_metadata", {}),
+                    "optimization_strategy": optimization_result.strategy_used.value,
+                    "query_count": len(optimization_result.optimized_queries),
+                    "optimization_confidence": optimization_result.confidence_score
+                }
+            })
+            
+            logger.info(f"Enhanced response with optimization metadata: strategy={optimization_result.strategy_used.value}, confidence={optimization_result.confidence_score:.2f}")
+            return enhanced_response
+            
+        except Exception as e:
+            logger.error(f"Response formatting with optimization failed: {str(e)}")
+            # Fallback to basic enhanced response
+            return self._format_enhanced_response(response, query_analysis, context)
     
     def _fallback_to_basic_query(self, question: str, error: Exception) -> Dict[str, Any]:
         """Fallback to basic query processing if enhancement fails"""
