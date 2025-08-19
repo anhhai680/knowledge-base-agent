@@ -8,11 +8,9 @@ Implements sophisticated query optimization capabilities including:
 - Dynamic retrieval optimization
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from enum import Enum
-import re
-import json
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)

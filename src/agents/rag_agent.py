@@ -1,11 +1,11 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.docstore.document import Document
 from ..utils.logging import get_logger
 from .prompts import PromptComponents
 from .query_optimizer import AdvancedQueryOptimizer, QueryOptimizationResult
-from .response_quality_enhancer import EnhancedResponseQualityEnhancer, EnhancementResult
+from .response_quality_enhancer import EnhancedResponseQualityEnhancer
 
 logger = get_logger(__name__)
 

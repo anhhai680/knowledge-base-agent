@@ -5,13 +5,10 @@ Implements a ReAct (Reasoning and Acting) agent that extends the enhanced RAG ag
 with tool usage capabilities, action planning, and execution monitoring.
 """
 
-from typing import Dict, Any, List, Optional, Union, Callable
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 from enum import Enum
-import json
-import re
 from langchain.tools import BaseTool
-from langchain.schema import BaseMessage, HumanMessage, AIMessage
 from ..utils.logging import get_logger
 from .rag_agent import RAGAgent, QueryAnalysis
 

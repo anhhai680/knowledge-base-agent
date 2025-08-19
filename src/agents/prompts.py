@@ -121,7 +121,7 @@ class PromptComponents:
         return prompt_map[prompt_type]
     
     @classmethod
-    def build_custom_prompt(cls, components: list = None) -> str:
+    def build_custom_prompt(cls, components: list = []) -> str:
         """Build a custom prompt from selected components"""
         if components is None:
             return cls.build_full_prompt()
