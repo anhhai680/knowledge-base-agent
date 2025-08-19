@@ -28,35 +28,31 @@ This work follows the comprehensive plan in `docs/diagram-enhancement-implementa
 **Overall Status:** In Progress - 30%
 
 ### Phase 1: Immediate Fixes (Current Focus)
-| ID | Description | Status | Updated | Notes |
-|----|-------------|--------|---------|-------|
-| 1.1 | Fix `_compile_diagram_patterns` method | Complete | Aug 19, 2025 | Removed duplicates, fixed escaping |
-| 1.2 | Enhance diagram detection logic | In Progress | Aug 19, 2025 | Working on improved detection |
-| 1.3 | Add mermaid response enhancement | Not Started | - | Next priority |
-| 1.4 | Improve error handling | Not Started | - | After mermaid enhancement |
-| 1.5 | Performance optimization | Not Started | - | Final phase 1 task |
+| ID | Task | Description | Status | Updated | Notes |
+|----|------|-------------|--------|---------|-------|
+| TASK025 | Fix _compile_diagram_patterns | Remove duplicates, fix escaping, add mermaid patterns | Complete | Aug 19, 2025 | Completed pattern compilation fixes |
+| TASK026 | Enhance Diagram Detection Logic | Improve detection method, add mermaid-specific detection | In Progress | Aug 19, 2025 | Working on improved detection |
+| TASK027 | Add Mermaid Response Enhancement | Implement mermaid-specific responses and instructions | Not Started | - | Next priority after detection |
 
 ### Phase 2: Architecture Enhancement (Planned)
-| ID | Description | Status | Updated | Notes |
-|----|-------------|--------|---------|-------|
-| 2.1 | Create DiagramAgent class | Not Started | - | Separate agent architecture |
-| 2.2 | Refactor DiagramHandler | Not Started | - | Focus on processing logic |
-| 2.3 | Implement agent factory pattern | Not Started | - | Extensible agent system |
-| 2.4 | Enhanced integration | Not Started | - | Better RAG integration |
+| ID | Task | Description | Status | Updated | Notes |
+|----|------|-------------|--------|---------|-------|
+| TASK028 | Create Diagram Agent Structure | Build dedicated DiagramAgent class with enhanced capabilities | Not Started | - | Requires Phase 1 completion |
+| TASK029 | Implement Enhanced Code Retrieval | Query optimization, semantic analysis, repository filtering | Not Started | - | Core retrieval improvements |
+| TASK030 | Add Multi-Diagram Type Support | Sequence, flowchart, class, ER, component diagrams | Not Started | - | Comprehensive diagram support |
 
-### Phase 3: Feature Expansion (Future)
-| ID | Description | Status | Updated | Notes |
-|----|-------------|--------|---------|-------|
-| 3.1 | Multiple diagram types | Not Started | - | Beyond sequence diagrams |
-| 3.2 | Advanced mermaid features | Not Started | - | Complex diagram generation |
-| 3.3 | Interactive diagram features | Not Started | - | User interaction capabilities |
+### Phase 3: Integration and Migration (Future)
+| ID | Task | Description | Status | Updated | Notes |
+|----|------|-------------|--------|---------|-------|
+| TASK031 | Update Agent Router Integration | Integrate DiagramAgent with existing router | Not Started | - | Dual-agent support |
+| TASK032 | Update Main Application Integration | Initialize DiagramAgent with dependencies | Not Started | - | Application-level integration |
 
-### Phase 4: Integration & Testing (Future)
-| ID | Description | Status | Updated | Notes |
-|----|-------------|--------|---------|-------|
-| 4.1 | Comprehensive testing | Not Started | - | Full system validation |
-| 4.2 | Performance benchmarking | Not Started | - | Measure improvements |
-| 4.3 | Documentation updates | Not Started | - | Reflect all changes |
+### Phase 4: Testing and Validation (Future)
+| ID | Task | Description | Status | Updated | Notes |
+|----|------|-------------|--------|---------|-------|
+| TASK033 | Implement Comprehensive Unit Testing | Pattern detection, generation quality, error handling | Not Started | - | 100% test coverage |
+| TASK034 | Implement Integration Testing | End-to-end, multi-repo, various diagram types | Not Started | - | Real-world validation |
+| TASK035 | Implement Performance Testing | Speed, memory, quality benchmarks | Not Started | - | Performance validation |
 
 ## Progress Log
 ### August 19, 2025
