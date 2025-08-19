@@ -14,6 +14,263 @@ from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+class SafeMathEvaluator:
+    """Safe mathematical expression evaluator that only allows mathematical operations"""
+    
+    def __init__(self):
+        # Define allowed mathematical operators and functions
+        self.allowed_operators = {'+', '-', '*', '/', '**', '//', '%'}
+        self.allowed_functions = {
+            'abs', 'round', 'min', 'max', 'sum', 'pow', 'sqrt',
+            'sin', 'cos', 'tan', 'asin', 'acos', 'atan',
+            'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
+            'log', 'log10', 'exp', 'floor', 'ceil', 'trunc',
+            'factorial', 'gcd', 'lcm'
+        }
+    
+    def _tokenize(self, expression: str) -> List[str]:
+        """Tokenize the mathematical expression"""
+        # Remove all whitespace
+        expr = ''.join(expression.split())
+        
+        # Split into tokens
+        tokens = []
+        current = ""
+        i = 0
+        
+        while i < len(expr):
+            char = expr[i]
+            
+            if char.isdigit() or char == '.':
+                # Number
+                current += char
+            elif char in self.allowed_operators or char in '()':
+                # Operator or parenthesis
+                if current:
+                    tokens.append(current)
+                    current = ""
+                tokens.append(char)
+            elif char.isalpha():
+                # Function name or variable
+                current += char
+            else:
+                # Invalid character
+                raise ValueError(f"Invalid character in expression: {char}")
+            
+            i += 1
+        
+        if current:
+            tokens.append(current)
+        
+        return tokens
+    
+    def _validate_tokens(self, tokens: List[str]) -> bool:
+        """Validate that tokens only contain safe mathematical operations"""
+        for token in tokens:
+            if token in self.allowed_operators or token in '()':
+                continue
+            elif token.replace('.', '').isdigit():
+                continue
+            elif token in self.allowed_functions:
+                continue
+            else:
+                raise ValueError(f"Invalid token in expression: {token}")
+        return True
+    
+    def _evaluate_tokens(self, tokens: List[str]) -> float:
+        """Evaluate the mathematical expression from tokens"""
+        # Convert to postfix notation and evaluate
+        def precedence(op):
+            if op in {'+', '-'}:
+                return 1
+            elif op in {'*', '/', '//', '%'}:
+                return 2
+            elif op == '**':
+                return 3
+            return 0
+        
+        def apply_operator(a, b, op):
+            if op == '+':
+                return a + b
+            elif op == '-':
+                return a - b
+            elif op == '*':
+                return a * b
+            elif op == '/':
+                if b == 0:
+                    raise ValueError("Division by zero")
+                return a / b
+            elif op == '//':
+                if b == 0:
+                    raise ValueError("Division by zero")
+                return a // b
+            elif op == '%':
+                if b == 0:
+                    raise ValueError("Modulo by zero")
+                return a % b
+            elif op == '**':
+                return a ** b
+        
+        def apply_function(func, args):
+            if func == 'abs':
+                return abs(args[0])
+            elif func == 'round':
+                return round(args[0])
+            elif func == 'min':
+                return min(args)
+            elif func == 'max':
+                return max(args)
+            elif func == 'sum':
+                return sum(args)
+            elif func == 'pow':
+                return pow(args[0], args[1])
+            elif func == 'sqrt':
+                return math.sqrt(args[0])
+            elif func == 'sin':
+                return math.sin(args[0])
+            elif func == 'cos':
+                return math.cos(args[0])
+            elif func == 'tan':
+                return math.tan(args[0])
+            elif func == 'asin':
+                return math.asin(args[0])
+            elif func == 'acos':
+                return math.acos(args[0])
+            elif func == 'atan':
+                return math.atan(args[0])
+            elif func == 'sinh':
+                return math.sinh(args[0])
+            elif func == 'cosh':
+                return math.cosh(args[0])
+            elif func == 'tanh':
+                return math.tanh(args[0])
+            elif func == 'asinh':
+                return math.asinh(args[0])
+            elif func == 'acosh':
+                return math.acosh(args[0])
+            elif func == 'atanh':
+                return math.atanh(args[0])
+            elif func == 'log':
+                return math.log(args[0])
+            elif func == 'log10':
+                return math.log10(args[0])
+            elif func == 'exp':
+                return math.exp(args[0])
+            elif func == 'floor':
+                return math.floor(args[0])
+            elif func == 'ceil':
+                return math.ceil(args[0])
+            elif func == 'trunc':
+                return math.trunc(args[0])
+            elif func == 'factorial':
+                return math.factorial(int(args[0]))
+            elif func == 'gcd':
+                return math.gcd(int(args[0]), int(args[1]))
+            elif func == 'lcm':
+                return math.lcm(int(args[0]), int(args[1]))
+            else:
+                raise ValueError(f"Unknown function: {func}")
+        
+        # Convert to postfix notation
+        output = []
+        operators = []
+        i = 0
+        
+        while i < len(tokens):
+            token = tokens[i]
+            
+            if token.replace('.', '').isdigit():
+                output.append(float(token))
+            elif token in self.allowed_functions:
+                # Function call
+                func = token
+                i += 1
+                if i >= len(tokens) or tokens[i] != '(':
+                    raise ValueError(f"Expected '(' after function {func}")
+                
+                # Parse function arguments
+                args = []
+                paren_count = 1
+                arg_start = i + 1
+                i += 1
+                
+                while i < len(tokens) and paren_count > 0:
+                    if tokens[i] == '(':
+                        paren_count += 1
+                    elif tokens[i] == ')':
+                        paren_count -= 1
+                    elif tokens[i] == ',' and paren_count == 1:
+                        # End of argument
+                        arg_tokens = tokens[arg_start:i]
+                        if arg_tokens:
+                            args.append(self._evaluate_tokens(arg_tokens))
+                        arg_start = i + 1
+                    i += 1
+                
+                # Add last argument
+                if arg_start < i - 1:
+                    arg_tokens = tokens[arg_start:i-1]
+                    if arg_tokens:
+                        args.append(self._evaluate_tokens(arg_tokens))
+                
+                if paren_count != 0:
+                    raise ValueError(f"Mismatched parentheses in function {func}")
+                
+                output.append(apply_function(func, args))
+                continue
+            elif token == '(':
+                operators.append(token)
+            elif token == ')':
+                while operators and operators[-1] != '(':
+                    op = operators.pop()
+                    b = output.pop()
+                    a = output.pop()
+                    output.append(apply_operator(a, b, op))
+                if operators and operators[-1] == '(':
+                    operators.pop()
+                else:
+                    raise ValueError("Mismatched parentheses")
+            elif token in self.allowed_operators:
+                while (operators and operators[-1] != '(' and 
+                       precedence(operators[-1]) >= precedence(token)):
+                    op = operators.pop()
+                    b = output.pop()
+                    a = output.pop()
+                    output.append(apply_operator(a, b, op))
+                operators.append(token)
+            
+            i += 1
+        
+        # Process remaining operators
+        while operators:
+            op = operators.pop()
+            if op == '(':
+                raise ValueError("Mismatched parentheses")
+            b = output.pop()
+            a = output.pop()
+            output.append(apply_operator(a, b, op))
+        
+        if len(output) != 1:
+            raise ValueError("Invalid expression")
+        
+        return output[0]
+    
+    def evaluate(self, expression: str) -> float:
+        """Safely evaluate a mathematical expression"""
+        try:
+            # Clean the expression - only allow safe characters
+            clean_expr = re.sub(r'[^0-9+\-*/().\s\w]', '', expression)
+            
+            # Tokenize and validate
+            tokens = self._tokenize(clean_expr)
+            self._validate_tokens(tokens)
+            
+            # Evaluate
+            return self._evaluate_tokens(tokens)
+            
+        except Exception as e:
+            raise ValueError(f"Invalid mathematical expression: {str(e)}")
+
 class SearchTool(BaseTool):
     """Basic search tool for demonstration"""
     
@@ -43,16 +300,17 @@ class CalculatorTool(BaseTool):
     name: str = "calculator"
     description: str = "Perform mathematical calculations"
     
+    def __init__(self):
+        super().__init__()
+        self.math_evaluator = SafeMathEvaluator()
+    
     def _run(self, expression: str) -> str:
         """Execute the calculation"""
         logger.info(f"Calculating: {expression}")
         
         try:
-            # Clean the expression
-            clean_expr = re.sub(r'[^0-9+\-*/().\s]', '', expression)
-            
-            # Evaluate safely
-            result = eval(clean_expr)
+            # Use safe mathematical evaluator instead of eval()
+            result = self.math_evaluator.evaluate(expression)
             
             return f"Result of {expression} = {result}"
             
