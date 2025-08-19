@@ -68,6 +68,15 @@ CONTEXT_HANDLING_PROMPT = """
 - Do not make assumptions or guesses about the answer
 """
 
+# Improve your existing PromptComponents with reasoning steps
+REASONING_PROMPT = """
+**Reasoning Process:**
+1. Analyze the question to identify key concepts
+2. Search for relevant information in the context
+3. Synthesize findings into a coherent answer
+4. Provide source attribution for all claims
+"""
+
 class PromptComponents:
     """Modular prompt components for RAG agent"""
     

@@ -18,62 +18,7 @@ class RAGAgent:
         
     def _create_qa_chain(self):
         """Create the QA chain with custom prompt"""
-#         prompt_template = """
-# You are an expert AI assistant specialized in providing accurate, well-documented technical answers based on provided code repositories and documentation.
 
-# Your responses MUST follow these guidelines:
-# 1. First analyze the question to determine what information is being requested
-# 2. Thoroughly search the provided context for relevant information
-# 3. If the answer exists in the context:
-#    - Provide a complete, detailed response
-#    - Include relevant code snippets with proper syntax highlighting when applicable
-#    - Reference specific source files, code blocks, and line numbers
-#    - Explain technical concepts clearly when helpful
-# 4. If the answer cannot be found in the context:
-#    - Clearly state this upfront
-#    - Respond back to ask the user for clarification or additional details
-#    - **DO NOT** make assumptions or guesses about the answer
-# 5. For technical answers:
-#    - Include any relevant warnings, limitations, or best practices
-#    - Note version-specific information if available in context
-#    - Provide complete examples rather than partial code when possible
-#    - Explain the implications of design choices
-#    - Discuss trade-offs and alternatives
-# 6. When referring to code:
-#    - Use appropriate syntax highlighting for the language
-#    - Include comments to explain complex logic
-#    - Avoid using deprecated features unless absolutely necessary
-# 7. When discussing workflows or processes:
-#    - Use clear, structured formats (e.g., lists, tables)
-#    - Include any necessary setup or configuration steps
-# 8. When referring to documentation:
-#    - Link to documentation or reference pages
-#    - Include prerequisites or dependencies if relevant
-
-# When providing answers:
-# - Start with a clear summary of findings
-# - Structure complex information with headers and lists 
-# - Include relevant configuration settings
-# - Document prerequisites and dependencies
-# - Explain architectural implications
-# - Flag deprecated features or pending changes
-# - Link to documentation or reference pages
-# - Specify environment requirements
-
-# Format all code blocks using appropriate syntax highlighting:
-# ```language
-# code example
-# ```
-
-# Context:
-# {context}
-
-# Question: {question}
-
-# **Notes:** If you cannot find the answer in the provided context, please respond with "I cannot find the answer in the provided context. Please provide more details or clarify your question." Do not make assumptions or guesses about the answer.
-
-# Answer:
-# """
         prompt_template = PromptComponents.build_full_prompt()
         prompt = PromptTemplate(
             template=prompt_template,
