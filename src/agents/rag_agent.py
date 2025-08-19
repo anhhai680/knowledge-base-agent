@@ -5,6 +5,7 @@ from langchain.docstore.document import Document
 from ..utils.logging import get_logger
 from .prompts import PromptComponents
 from .query_optimizer import AdvancedQueryOptimizer, QueryOptimizationResult
+from .response_quality_enhancer import EnhancedResponseQualityEnhancer, EnhancementResult
 
 logger = get_logger(__name__)
 
@@ -39,6 +40,9 @@ class RAGAgent:
         
         # Initialize advanced query optimizer
         self.query_optimizer = AdvancedQueryOptimizer(llm, self.enhancement_config.get("query_optimization", {}))
+        
+        # Initialize enhanced response quality enhancer
+        self.response_quality_enhancer = EnhancedResponseQualityEnhancer(llm, self.enhancement_config.get("response_quality", {}))
         
     def _get_default_enhancement_config(self) -> Dict[str, Any]:
         """Get default enhancement configuration"""
@@ -334,10 +338,34 @@ class RAGAgent:
                                 question: str) -> Dict[str, Any]:
         """Enhance response quality through validation and improvement"""
         try:
-            return self.response_enhancer.enhance_response(response, context, question)
+            # Use enhanced response quality enhancer for comprehensive quality improvement
+            enhancement_result = self.response_quality_enhancer.enhance_response_quality(
+                response, context, question
+            )
+            
+            # Update response with enhanced answer
+            enhanced_response = response.copy()
+            enhanced_response["answer"] = enhancement_result.enhanced_response
+            
+            # Add enhancement metadata
+            enhanced_response["enhancement_metadata"] = {
+                "enhancement_type": enhancement_result.enhancement_type.value,
+                "quality_improvement": enhancement_result.quality_improvement,
+                "changes_made": enhancement_result.changes_made,
+                "enhancement_details": enhancement_result.metadata
+            }
+            
+            logger.info(f"Response quality enhancement completed: improvement={enhancement_result.quality_improvement:.2f}")
+            return enhanced_response
+            
         except Exception as e:
-            logger.warning(f"Response enhancement failed, using original response: {str(e)}")
-            return response
+            logger.warning(f"Enhanced response quality enhancement failed, using original response: {str(e)}")
+            # Fallback to basic enhancement
+            try:
+                return self.response_enhancer.enhance_response(response, context, question)
+            except Exception as fallback_error:
+                logger.warning(f"Basic response enhancement also failed: {str(fallback_error)}")
+                return response
     
     def _format_enhanced_response(self, response: Dict[str, Any], query_analysis: QueryAnalysis, 
                                 context: List[Document]) -> Dict[str, Any]:
@@ -364,6 +392,9 @@ class RAGAgent:
                 "query_analysis": response.get("query_analysis", {}),
                 "context_quality_score": response.get("context_metadata", {}).get("context_quality_score"),
                 "enhancement_iterations": response.get("context_metadata", {}).get("refinement_iterations", 0),
+                
+                # Enhanced response quality metadata
+                "response_quality_enhancement": response.get("enhancement_metadata", {}),
                 
                 # Maintain backward compatibility
                 "mermaid_code": None,
