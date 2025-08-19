@@ -88,7 +88,7 @@ class RAGAgent:
             logger.error(f"Failed to create QA chain: {str(e)}")
             raise
     
-    def query(self, question: str) -> Dict[str, Any]:
+    def process_query(self, question: str) -> Dict[str, Any]:
         """Enhanced query method with Chain-of-Thought reasoning"""
         logger.info(f"Processing enhanced query: {question[:100]}...")
         
