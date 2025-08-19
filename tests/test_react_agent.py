@@ -110,7 +110,11 @@ class TestActionPlanner:
         # Set the name attributes as strings
         self.mock_tools[0].name = "web_search"
         self.mock_tools[1].name = "calculator"
-        self.mock_tools[2].name = "code_executor"
+        self.mock_tools = [
+            create_mock_tool("web_search", "Search tool"),
+            create_mock_tool("calculator", "Calculator tool"),
+            create_mock_tool("code_executor", "Code execution tool")
+        ]
         
         self.config = {"max_tool_calls_per_iteration": 3}
         self.planner = ActionPlanner(self.mock_llm, self.mock_tools, self.config)
