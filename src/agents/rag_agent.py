@@ -213,7 +213,11 @@ class RAGAgent:
                 optimized_queries=[question],
                 strategy_used=self.query_optimizer.strategy_selector.select_strategy(
                     self.query_optimizer.semantic_analyzer.analyze_query(question)
-                ),
+            # Use a static fallback strategy; replace 'DEFAULT' with an appropriate value if needed
+            return QueryOptimizationResult(
+                original_query=question,
+                optimized_queries=[question],
+                strategy_used=getattr(QueryOptimizationResult, "DEFAULT_STRATEGY", "default"),
                 confidence_score=0.5,
                 reasoning=f"Optimization failed, using original query: {str(e)}",
                 metadata={"error": str(e)}
