@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 class GitHubLoader:
     """GitHub repository loader"""
     
-    def __init__(self, github_token: str = None):
+    def __init__(self, github_token: str = ""):
         self.github_token = github_token
         self.supported_extensions = settings.settings.github_supported_file_extensions
     
@@ -66,13 +66,6 @@ class GitHubLoader:
         import fnmatch
         
         documents = []
-        
-        # If file_patterns provided, use them; otherwise use supported extensions
-        if file_patterns:
-            # For file_patterns, we'll use fnmatch directly, no need to convert to extensions
-            pattern_extensions = None
-        else:
-            pattern_extensions = self.supported_extensions
         
         total_files_found = 0
         matched_files = 0
