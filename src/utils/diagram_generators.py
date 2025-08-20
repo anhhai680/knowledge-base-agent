@@ -10,7 +10,7 @@ This module provides pattern extraction and Mermaid diagram generation for vario
 """
 
 import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from langchain.docstore.document import Document
 from ..utils.logging import get_logger
 

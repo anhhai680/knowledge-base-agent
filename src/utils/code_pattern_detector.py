@@ -7,7 +7,7 @@ SequenceDetector for robust code analysis.
 """
 
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from dataclasses import dataclass
 from langchain.docstore.document import Document
 
