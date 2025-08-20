@@ -96,10 +96,12 @@ docker-compose logs -f knowledge-base-agent
 
 ### Performance Requirements
 - **Indexing Speed**: Process 1000+ files in under 5 minutes
-- **Query Response**: Average response time < 3 seconds
+- **Query Response**: Average response time < 3 seconds for text queries
 - **Diagram Generation**: Average response time < 6 seconds for sequence diagrams
+- **Advanced RAG Processing**: < 5 seconds for complex reasoning chains
 - **Concurrent Users**: Support 10+ simultaneous users
 - **Memory Usage**: Reasonable memory footprint for local development
+- **Test Coverage**: 101+ tests across all system components
 
 ### Compatibility Requirements
 - **Python Version**: 3.11+ (required for modern async features)
@@ -119,11 +121,19 @@ docker-compose logs -f knowledge-base-agent
 
 **LangChain Ecosystem:**
 ```python
-langchain>=0.1.0              # Core RAG framework
+langchain>=0.1.0              # Core RAG framework with advanced patterns
 langchain-openai>=0.1.0       # OpenAI integration
 langchain-google-genai>=1.0.0 # Gemini integration
-langchain-community>=0.0.20   # Community extensions
+langchain-community>=0.0.20   # Community extensions and tools
 langchain-ollama>=0.1.0       # Ollama integration
+```
+
+**Advanced RAG Components:**
+```python
+# Enhanced reasoning and query processing
+pydantic>=2.5.0               # Data validation for complex chains
+asyncio                       # Async processing for performance
+typing-extensions>=4.8.0      # Advanced type hints for complex patterns
 ```
 
 **LLM Provider SDKs:**
