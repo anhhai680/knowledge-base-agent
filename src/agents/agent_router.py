@@ -3,8 +3,9 @@ AgentRouter - Routes queries to appropriate specialized agents with enhanced pat
 """
 
 import re
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from ..utils.logging import get_logger
+from ..config.agent_config import AgentConfig, DiagramAgentType, DEFAULT_AGENT_CONFIG
 
 logger = get_logger(__name__)
 
@@ -12,11 +13,34 @@ logger = get_logger(__name__)
 class AgentRouter:
     """Routes queries to appropriate specialized agents with enhanced pattern detection"""
     
-    def __init__(self, rag_agent, diagram_handler):
+    def __init__(self, rag_agent, diagram_handler, diagram_agent=None, agent_config=None):
+        """
+        Initialize AgentRouter with dual diagram agent support
+        
+        Args:
+            rag_agent: RAG agent for general queries
+            diagram_handler: Legacy DiagramHandler for backward compatibility
+            diagram_agent: Optional enhanced DiagramAgent for advanced capabilities
+            agent_config: Optional agent configuration for routing behavior
+        """
         self.rag_agent = rag_agent
         self.diagram_handler = diagram_handler
+        self.diagram_agent = diagram_agent
+        self.agent_config = agent_config or DEFAULT_AGENT_CONFIG
+        
         # Pre-compile regex patterns for better performance
         self._diagram_patterns = self._compile_diagram_patterns()
+        
+        # Log agent configuration
+        logger.info(f"AgentRouter initialized with diagram agents: "
+                   f"handler={'Yes'}, agent={'Yes' if diagram_agent else 'No'}, "
+                   f"preferred={self.agent_config.routing.preferred_diagram_agent}")
+        
+        # Validate configuration
+        if (self.agent_config.routing.preferred_diagram_agent == DiagramAgentType.DIAGRAM_AGENT 
+            and not self.diagram_agent):
+            logger.warning("DiagramAgent preferred but not provided, falling back to DiagramHandler")
+            self.agent_config.routing.preferred_diagram_agent = DiagramAgentType.DIAGRAM_HANDLER
     
     def route_query(self, question: str) -> Dict[str, Any]:
         """Route query to appropriate agent based on content analysis"""
@@ -217,19 +241,31 @@ class AgentRouter:
             }
     
     def _generate_diagram_response(self, query: str) -> Dict[str, Any]:
-        """Generate diagram with enhanced mermaid support and response quality"""
+        """Generate diagram with enhanced mermaid support and intelligent agent selection"""
         try:
+            # Select appropriate diagram agent
+            selected_agent = self._select_diagram_agent(query)
+            agent_name = "DiagramAgent" if selected_agent == self.diagram_agent else "DiagramHandler"
+            
+            logger.info(f"Selected {agent_name} for diagram generation")
+            
             # Check if this is a mermaid-specific request
             is_mermaid_request = self._is_mermaid_specific_request(query)
             
-            # Generate diagram using DiagramHandler
-            diagram_result = self.diagram_handler.generate_sequence_diagram(query)
+            # Generate diagram using selected agent
+            diagram_result = self._generate_with_agent(selected_agent, query)
             
             # Enhance response for mermaid requests
             if is_mermaid_request and diagram_result.get("mermaid_code"):
                 enhanced_answer = self._enhance_mermaid_response(diagram_result, query)
             else:
-                enhanced_answer = diagram_result.get("analysis_summary", "Generated sequence diagram")
+                # Handle different response formats from different agents
+                if diagram_result.get("answer"):
+                    # DiagramAgent format
+                    enhanced_answer = diagram_result.get("answer")
+                else:
+                    # DiagramHandler format
+                    enhanced_answer = diagram_result.get("analysis_summary", "Generated diagram")
             
             # Format as standard QueryResponse with mermaid_code extension
             return {
@@ -238,11 +274,19 @@ class AgentRouter:
                 "status": diagram_result.get("status", "success"),
                 "num_sources": len(diagram_result.get("source_documents", [])),
                 "mermaid_code": diagram_result.get("mermaid_code"),
-                "diagram_type": "sequence"
+                "diagram_type": diagram_result.get("diagram_type", "sequence")
             }
             
         except Exception as e:
             logger.error(f"Diagram generation failed: {str(e)}")
+            
+            # Attempt fallback if enabled and primary agent failed
+            if self.agent_config.routing.enable_agent_fallback:
+                try:
+                    return self._attempt_fallback_diagram_generation(query, str(e))
+                except Exception as fallback_error:
+                    logger.error(f"Fallback also failed: {str(fallback_error)}")
+            
             return {
                 "answer": "I encountered an error while generating the diagram. Please try again or ask about available flows in the codebase.",
                 "source_documents": [],
@@ -290,3 +334,151 @@ class AgentRouter:
 💡 **Tip**: You can also use this in documentation, README files, or technical specifications."""
         
         return enhanced_response
+    
+    def _select_diagram_agent(self, query: str):
+        """
+        Select appropriate diagram agent based on configuration and query complexity
+        
+        Returns:
+            Selected agent instance (DiagramAgent or DiagramHandler)
+        """
+        # If DiagramAgent not available, use DiagramHandler
+        if not self.diagram_agent:
+            logger.debug("DiagramAgent not available, using DiagramHandler")
+            return self.diagram_handler
+        
+        preference = self.agent_config.routing.preferred_diagram_agent
+        
+        # Handle explicit preferences
+        if preference == DiagramAgentType.DIAGRAM_HANDLER:
+            logger.debug("Using DiagramHandler per configuration")
+            return self.diagram_handler
+        elif preference == DiagramAgentType.DIAGRAM_AGENT:
+            logger.debug("Using DiagramAgent per configuration")
+            return self.diagram_agent
+        
+        # Handle auto-selection
+        if preference == DiagramAgentType.AUTO and self.agent_config.routing.auto_selection_enabled:
+            if self._is_complex_diagram_request(query):
+                logger.debug("Complex query detected, using DiagramAgent")
+                return self.diagram_agent
+            else:
+                logger.debug("Simple query detected, using DiagramHandler")
+                return self.diagram_handler
+        
+        # Default fallback
+        logger.debug("Using default DiagramHandler")
+        return self.diagram_handler
+    
+    def _is_complex_diagram_request(self, query: str) -> bool:
+        """
+        Determine if query requires enhanced DiagramAgent capabilities
+        
+        Args:
+            query: User query
+            
+        Returns:
+            True if query is complex and should use DiagramAgent
+        """
+        query_lower = query.lower()
+        
+        # Check for complex diagram keywords
+        complex_keywords = self.agent_config.routing.complex_query_keywords
+        has_complex_keywords = any(keyword in query_lower for keyword in complex_keywords)
+        
+        # Check for multi-diagram type indicators
+        diagram_type_count = 0
+        for keywords in [
+            ['sequence', 'interaction'],
+            ['flowchart', 'flow', 'workflow'], 
+            ['class', 'inheritance', 'composition'],
+            ['component', 'architecture', 'system'],
+            ['entity', 'relationship', 'database']
+        ]:
+            if any(keyword in query_lower for keyword in keywords):
+                diagram_type_count += 1
+        
+        # Check for enhanced analysis keywords
+        enhanced_keywords = [
+            'analyze', 'pattern', 'relationship', 'dependency',
+            'architecture', 'design', 'structure', 'optimization'
+        ]
+        has_enhanced_keywords = any(keyword in query_lower for keyword in enhanced_keywords)
+        
+        # Complex if: multiple diagram types, complex keywords, or enhanced analysis
+        is_complex = (
+            diagram_type_count > 1 or 
+            has_complex_keywords or 
+            has_enhanced_keywords
+        )
+        
+        logger.debug(f"Query complexity analysis: types={diagram_type_count}, "
+                    f"complex_kw={has_complex_keywords}, enhanced_kw={has_enhanced_keywords}, "
+                    f"complex={is_complex}")
+        
+        return is_complex
+    
+    def _generate_with_agent(self, agent, query: str) -> Dict[str, Any]:
+        """
+        Generate diagram using the specified agent with unified interface
+        
+        Args:
+            agent: Agent instance (DiagramHandler or DiagramAgent)
+            query: User query
+            
+        Returns:
+            Diagram generation result
+        """
+        # Use DiagramAgent's enhanced interface
+        if hasattr(agent, 'process_query'):
+            logger.debug("Using DiagramAgent.process_query()")
+            return agent.process_query(query)
+        
+        # Use DiagramHandler's legacy interface  
+        elif hasattr(agent, 'generate_sequence_diagram'):
+            logger.debug("Using DiagramHandler.generate_sequence_diagram()")
+            return agent.generate_sequence_diagram(query)
+        
+        else:
+            raise ValueError(f"Agent {type(agent).__name__} has no supported interface")
+    
+    def _attempt_fallback_diagram_generation(self, query: str, original_error: str) -> Dict[str, Any]:
+        """
+        Attempt fallback diagram generation with alternative agent
+        
+        Args:
+            query: Original query
+            original_error: Error from primary agent
+            
+        Returns:
+            Fallback diagram result or error response
+        """
+        logger.info("Attempting fallback diagram generation")
+        
+        # Determine fallback agent
+        if self.diagram_agent and self.diagram_handler:
+            # Try the other agent
+            primary_was_advanced = hasattr(self._select_diagram_agent(query), 'process_query')
+            fallback_agent = self.diagram_handler if primary_was_advanced else self.diagram_agent
+            fallback_name = "DiagramHandler" if primary_was_advanced else "DiagramAgent"
+        else:
+            # Only one agent available, can't fallback
+            raise Exception(f"Fallback not possible: {original_error}")
+        
+        logger.info(f"Falling back to {fallback_name}")
+        
+        try:
+            result = self._generate_with_agent(fallback_agent, query)
+            
+            # Add fallback notice to answer
+            if result.get("answer"):
+                result["answer"] = f"⚠️ **Fallback Response**: Generated using {fallback_name} due to primary agent error.\n\n{result['answer']}"
+            
+            # Mark as fallback in metadata
+            result["fallback_used"] = True
+            result["original_error"] = original_error
+            
+            return result
+            
+        except Exception as e:
+            raise Exception(f"Both agents failed - Primary: {original_error}, Fallback: {str(e)}")

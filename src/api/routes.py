@@ -242,13 +242,64 @@ async def initialize_components():
         logger.info("Initializing RAG agent...")
         rag_agent = RAGAgent(llm, vector_store)
         
-        # Initialize diagram handler and agent router
-        logger.info("Initializing diagram handler and agent router...")
+        # Initialize diagram handler and agent router with dual agent support
+        logger.info("Initializing diagram agents and router...")
         from ..processors.diagram_handler import DiagramHandler
+        from ..agents.diagram_agent import DiagramAgent
         from ..agents.agent_router import AgentRouter
+        from ..config.agent_config import AgentConfig, AGENT_CONFIG_PRESETS
+        from ..agents.query_optimizer import AdvancedQueryOptimizer
+        from ..agents.response_quality_enhancer import EnhancedResponseQualityEnhancer
         
+        # Initialize diagram handler (legacy support)
         diagram_handler = DiagramHandler(vector_store, llm)
-        agent_router = AgentRouter(rag_agent, diagram_handler)
+        
+        # Initialize agent configuration (use hybrid preset for backward compatibility)
+        agent_config = AGENT_CONFIG_PRESETS.get("hybrid", AgentConfig())
+        
+        # Initialize enhanced components for DiagramAgent
+        diagram_agent = None
+        if agent_config.initialize_diagram_agent:
+            try:
+                logger.info("Initializing enhanced DiagramAgent...")
+                
+                # Initialize optional components safely
+                query_optimizer = None
+                response_enhancer = None
+                
+                try:
+                    query_optimizer = AdvancedQueryOptimizer()
+                    logger.debug("Query optimizer initialized")
+                except Exception as e:
+                    logger.warning(f"Query optimizer initialization failed: {str(e)}")
+                
+                try:
+                    response_enhancer = EnhancedResponseQualityEnhancer()
+                    logger.debug("Response enhancer initialized") 
+                except Exception as e:
+                    logger.warning(f"Response enhancer initialization failed: {str(e)}")
+                
+                # Initialize DiagramAgent with enhanced capabilities
+                diagram_agent = DiagramAgent(
+                    vectorstore=vector_store,
+                    llm=llm,
+                    query_optimizer=query_optimizer,
+                    response_enhancer=response_enhancer
+                )
+                logger.info("DiagramAgent initialized successfully")
+                
+            except Exception as e:
+                logger.warning(f"Failed to initialize DiagramAgent: {str(e)}")
+                logger.warning("Continuing with DiagramHandler only")
+                diagram_agent = None
+        
+        # Initialize agent router with dual agent support
+        agent_router = AgentRouter(
+            rag_agent=rag_agent,
+            diagram_handler=diagram_handler,
+            diagram_agent=diagram_agent,
+            agent_config=agent_config
+        )
         
         # Initialize other components
         logger.info("Initializing other components...")
