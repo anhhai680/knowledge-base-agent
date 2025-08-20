@@ -31,8 +31,8 @@ class CodeStructure:
     patterns: List[CodePattern]
 
 
-class CodeAnalyzer:
-    """Analyzes code structure and patterns for enhanced retrieval"""
+class CodePatternDetector:
+    """Detects code patterns using simple keywords for enhanced retrieval"""
     
     def __init__(self):
         # Simple pattern keywords for basic analysis
@@ -44,15 +44,15 @@ class CodeAnalyzer:
             'component': ['@component', '@service', '@controller', '@repository']
         }
     
-    def analyze_code_structure(self, documents: List[Document]) -> CodeStructure:
+    def detect_patterns(self, documents: List[Document]) -> CodeStructure:
         """
-        Analyze code structure across multiple documents using simple patterns
+        Detect code patterns across multiple documents using simple keywords
         
         Args:
             documents: List of code documents to analyze
             
         Returns:
-            CodeStructure containing analysis results
+            CodeStructure containing detected patterns
         """
         classes = []
         functions = []

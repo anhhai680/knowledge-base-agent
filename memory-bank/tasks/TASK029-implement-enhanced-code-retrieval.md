@@ -60,7 +60,7 @@ Enhanced code retrieval will significantly improve diagram generation quality an
 - ✅ **Query Optimization**: Created `QueryOptimizer` class with diagram-specific query enhancement and intent extraction capabilities
 - ✅ **Semantic Code Analysis**: Leveraged existing `SequenceDetector` infrastructure instead of creating duplicate AST parsing, providing robust multi-language code analysis
 - ✅ **Repository-Specific Filtering**: Implemented `RepositoryFilter` class with regex patterns for extracting repository names from queries and filtering documents accordingly
-- ✅ **Code Pattern Detection**: Created simplified `CodeAnalyzer` using keyword-based pattern detection for different diagram types (sequence, flowchart, class, ER, component)
+- ✅ **Code Pattern Detection**: Created simplified `CodePatternDetector` using keyword-based pattern detection for different diagram types (sequence, flowchart, class, ER, component)
 - ✅ **Enhanced DiagramAgent Integration**: Updated DiagramAgent to use the new enhanced retrieval components while maintaining compatibility with existing SequenceDetector
 - ✅ **Comprehensive Testing**: Created test suite with 15 test cases covering all aspects of enhanced code retrieval functionality
 - ✅ **Performance Optimization**: Implemented intelligent ranking and relevance scoring with intent awareness for better retrieval quality

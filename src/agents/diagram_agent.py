@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional
 from langchain.docstore.document import Document
 from ..processors.sequence_detector import SequenceDetector
 from ..utils.logging import get_logger
-from ..utils.code_analysis import CodeAnalyzer, QueryOptimizer, RepositoryFilter
+from ..utils.code_analysis import CodePatternDetector, QueryOptimizer, RepositoryFilter
 
 logger = get_logger(__name__)
 
@@ -37,7 +37,7 @@ class DiagramAgent:
         self.sequence_detector = SequenceDetector()
         
         # Initialize enhanced code analysis components
-        self.code_analyzer = CodeAnalyzer()
+        self.pattern_detector = CodePatternDetector()
         self.diagram_query_optimizer = QueryOptimizer()
         self.repository_filter = RepositoryFilter()
         

@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock, MagicMock, patch
 from langchain.docstore.document import Document
 from src.agents.diagram_agent import DiagramAgent
-from src.utils.code_analysis import CodeAnalyzer, QueryOptimizer, RepositoryFilter
+from src.utils.code_analysis import CodePatternDetector, QueryOptimizer, RepositoryFilter
 
 
 class TestEnhancedCodeRetrieval(unittest.TestCase):
@@ -179,31 +179,38 @@ class TestEnhancedCodeRetrieval(unittest.TestCase):
         """Test code pattern detection for different diagram types"""
         # Test sequence patterns
         content = "userService.getUser(userId).then(response => processUser(response))"
-        patterns = self.agent.code_analyzer._detect_sequence_patterns(
-            content, 'js', self.sample_docs[0]
-        )
+        structure = self.agent.pattern_detector.detect_patterns([self.sample_docs[0]])
         
-        self.assertGreater(len(patterns), 0)
-        self.assertEqual(patterns[0].pattern_type, 'sequence')
-        self.assertEqual(patterns[0].metadata['pattern'], 'method_call')
+        self.assertGreater(len(structure.patterns), 0)
+        # Check if sequence patterns are detected
+        sequence_patterns = [p for p in structure.patterns if p.pattern_type == 'sequence']
+        self.assertGreater(len(sequence_patterns), 0)
         
         # Test flowchart patterns
         content = "if (condition) { doSomething(); } else { doSomethingElse(); }"
-        patterns = self.agent.code_analyzer._detect_flowchart_patterns(
-            content, 'js', self.sample_docs[0]
+        flowchart_doc = Document(
+            page_content=content,
+            metadata={'file_type': 'js', 'file_path': 'test.js'}
         )
+        flowchart_structure = self.agent.pattern_detector.detect_patterns([flowchart_doc])
         
-        self.assertGreater(len(patterns), 0)
-        self.assertEqual(patterns[0].pattern_type, 'flowchart')
+        self.assertGreater(len(flowchart_structure.patterns), 0)
+        # Check if flowchart patterns are detected
+        flowchart_patterns = [p for p in flowchart_structure.patterns if p.pattern_type == 'flowchart']
+        self.assertGreater(len(flowchart_patterns), 0)
         
         # Test class patterns
         content = "class UserService extends BaseService implements IUserService"
-        patterns = self.agent.code_analyzer._detect_class_patterns(
-            content, 'cs', self.sample_docs[0]
+        class_doc = Document(
+            page_content=content,
+            metadata={'file_type': 'cs', 'file_path': 'test.cs'}
         )
+        class_structure = self.agent.pattern_detector.detect_patterns([class_doc])
         
-        self.assertGreater(len(patterns), 0)
-        self.assertEqual(patterns[0].pattern_type, 'class')
+        self.assertGreater(len(class_structure.patterns), 0)
+        # Check if class patterns are detected
+        class_patterns = [p for p in class_structure.patterns if p.pattern_type == 'class']
+        self.assertGreater(len(class_patterns), 0)
     
     def test_enhanced_result_processing(self):
         """Test enhanced result processing and ranking"""
@@ -242,7 +249,7 @@ class TestEnhancedCodeRetrieval(unittest.TestCase):
     def test_code_structure_analysis(self):
         """Test code structure analysis capabilities"""
         # Analyze sample documents
-        structure = self.agent.code_analyzer.analyze_code_structure(self.sample_docs)
+        structure = self.agent.pattern_detector.detect_patterns(self.sample_docs)
         
         # Should extract classes, functions, and patterns
         self.assertIsNotNone(structure.classes)
@@ -312,9 +319,9 @@ class TestEnhancedCodeRetrieval(unittest.TestCase):
 class TestCodeAnalysisUtilities(unittest.TestCase):
     """Test individual code analysis utility classes"""
     
-    def test_code_analyzer_pattern_detection(self):
+    def test_pattern_detector_pattern_detection(self):
         """Test pattern detection for different diagram types"""
-        analyzer = CodeAnalyzer()
+        detector = CodePatternDetector()
         
         # Test Python code with class patterns
         python_doc = Document(
@@ -328,7 +335,7 @@ class TestCodeAnalysisUtilities(unittest.TestCase):
             metadata={'file_type': 'js', 'file_path': 'user_processor.js'}
         )
         
-        structure = analyzer.analyze_code_structure([python_doc, js_doc])
+        structure = detector.detect_patterns([python_doc, js_doc])
         
         # Should detect classes and functions
         self.assertGreater(len(structure.classes), 0)
