@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock, MagicMock, patch
 from langchain.docstore.document import Document
 from src.agents.diagram_agent import DiagramAgent
-from src.utils.code_analysis import CodePatternDetector, QueryOptimizer, RepositoryFilter
+from src.utils.code_pattern_detector import CodePatternDetector, QueryOptimizer, RepositoryFilter
 
 
 class TestEnhancedCodeRetrieval(unittest.TestCase):

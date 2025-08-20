@@ -158,7 +158,7 @@ class QueryOptimizer:
                 intent['keywords'].extend([k for k in keywords if k in query_lower])
         
         if type_scores:
-            intent['preferred_type'] = max(type_scores, key=type_scores.get)
+            intent['preferred_type'] = max(type_scores.items(), key=lambda x: x[1])[0]
             intent['confidence'] += 0.4
         
         # Additional confidence for specific technical terms
