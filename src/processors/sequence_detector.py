@@ -449,84 +449,83 @@ class SequenceDetector:
     
     def _extract_service_name_from_content(self, content: str) -> Optional[str]:
         """Extract the primary service name from documentation content"""
-        # Look for service headers: # Car Listing Service
+        # Look for service headers: # Service Name
         header_match = re.search(r'^#\s+(.+?)\s*$', content, re.MULTILINE)
         if header_match:
             header_text = header_match.group(1).lower()
             if 'service' in header_text:
-                # Convert "Car Listing Service" to "CarListingService"
+                # Convert "Service Name" to "ServiceName"
                 words = header_text.replace('service', '').strip().split()
                 return ''.join(word.capitalize() for word in words) + 'Service'
-            elif 'order' in header_text:
-                return 'CarOrderService'
-            elif 'listing' in header_text or 'car' in header_text:
-                return 'CarListingService'
         
-        # Look for repository/project names
-        if 'car-listing' in content.lower():
-            return 'CarListingService'
-        elif 'car-order' in content.lower() or 'order service' in content.lower():
-            return 'CarOrderService'
-        elif 'car-notification' in content.lower():
-            return 'CarNotificationService'
-        elif 'car-web-client' in content.lower():
-            return 'CarWebClient'
+        # Look for repository/project names in content
+        # Extract from common patterns like "project-name", "service_name", etc.
+        repo_patterns = [
+            r'(\w+[-\w]*service)',  # service-name
+            r'(\w+[-\w]*api)',      # api-name
+            r'(\w+[-\w]*client)',   # client-name
+            r'(\w+[-\w]*app)',      # app-name
+        ]
         
-        # Return None instead of UnknownService to allow filtering
+        for pattern in repo_patterns:
+            matches = re.finditer(pattern, content.lower())
+            for match in matches:
+                service_name = match.group(1)
+                if service_name and len(service_name) > 5:  # Filter out very short names
+                    # Convert to PascalCase
+                    words = service_name.replace('-', ' ').replace('_', ' ').split()
+                    return ''.join(word.capitalize() for word in words)
+        
+        # Return None instead of hardcoded service names to allow filtering
         return None
     
     def _extract_service_from_endpoint(self, endpoint: str, context: str) -> Optional[str]:
         """Extract target service name from endpoint URL or context"""
-        # Check for port numbers to identify services
-        port_service_map = {
-            '5033': 'CarListingService',
-            '5068': 'CarOrderService', 
-            '5001': 'CarNotificationService',
-            '3000': 'CarWebClient'
-        }
-        
-        # Extract port from URL
-        port_match = re.search(r':(\d+)', endpoint)
-        if port_match:
-            port = port_match.group(1)
-            if port in port_service_map:
-                return port_service_map[port]
-        
         # Look for service names in the endpoint path
-        if '/car' in endpoint.lower():
-            return 'CarListingService'
-        elif '/order' in endpoint.lower():
-            return 'CarOrderService'
-        elif '/notification' in endpoint.lower():
-            return 'CarNotificationService'
+        if '/' in endpoint:
+            path_parts = endpoint.split('/')
+            # Look for meaningful path segments that could indicate services
+            for part in path_parts:
+                if part and len(part) > 3 and not part.isdigit():
+                    # Convert to PascalCase service name
+                    words = part.replace('-', ' ').replace('_', ' ').split()
+                    if words:
+                        service_name = ''.join(word.capitalize() for word in words) + 'Service'
+                        return service_name
         
         # Look for service names in context
-        if 'listing' in context.lower():
-            return 'CarListingService'
-        elif 'order' in context.lower():
-            return 'CarOrderService'
-        elif 'notification' in context.lower():
-            return 'CarNotificationService'
+        # Extract from common patterns like "service-name", "api_name", etc.
+        service_patterns = [
+            r'(\w+[-\w]*service)',  # service-name
+            r'(\w+[-\w]*api)',      # api-name
+            r'(\w+[-\w]*client)',   # client-name
+        ]
         
-        # Return None instead of ExternalAPI to filter out unclear interactions
+        for pattern in service_patterns:
+            matches = re.finditer(pattern, context.lower())
+            for match in matches:
+                service_name = match.group(1)
+                if service_name and len(service_name) > 5:
+                    # Convert to PascalCase
+                    words = service_name.replace('-', ' ').replace('_', ' ').split()
+                    return ''.join(word.capitalize() for word in words) + 'Service'
+        
+        # Return None instead of hardcoded service names to filter out unclear interactions
         return None
     
     def _normalize_service_name(self, service_name: str) -> str:
         """Normalize service names to consistent format"""
         service_name = service_name.lower()
         
-        if 'listing' in service_name or 'car-listing' in service_name:
-            return 'CarListingService'
-        elif 'order' in service_name or 'car-order' in service_name:
-            return 'CarOrderService'
-        elif 'notification' in service_name or 'car-notification' in service_name:
-            return 'CarNotificationService'
-        elif 'web' in service_name or 'client' in service_name:
-            return 'CarWebClient'
-        
-        # Convert kebab-case to PascalCase
+        # Convert kebab-case or snake_case to PascalCase
         words = service_name.replace('-', ' ').replace('_', ' ').split()
-        return ''.join(word.capitalize() for word in words)
+        normalized = ''.join(word.capitalize() for word in words)
+        
+        # Add 'Service' suffix if not already present
+        if not normalized.endswith('Service'):
+            normalized += 'Service'
+        
+        return normalized
     
     def _sanitize_method_call(self, method_call: str) -> str:
         """Sanitize method calls for Mermaid compatibility"""
@@ -546,80 +545,20 @@ class SequenceDetector:
         method_upper = http_method.upper()
         endpoint_lower = endpoint.lower()
         
-        # Business operation mappings
+        # Generic business operation mappings based on HTTP method
         if method_upper == 'POST':
-            if 'order' in endpoint_lower:
-                return 'Create Order'
-            elif 'user' in endpoint_lower or 'customer' in endpoint_lower:
-                return 'Create User'
-            elif 'auth' in endpoint_lower or 'login' in endpoint_lower:
-                return 'Authenticate User'
-            elif 'payment' in endpoint_lower:
-                return 'Process Payment'
-            elif 'car' in endpoint_lower or 'vehicle' in endpoint_lower:
-                return 'Add Vehicle'
-            elif 'notification' in endpoint_lower:
-                return 'Send Notification'
-            else:
-                operation = self._extract_operation_from_endpoint(endpoint, target_service)
-                return f'Create {operation}' if operation else 'Create Resource'
-                
+            return 'Create Resource'
         elif method_upper == 'GET':
             if 'swagger' in endpoint_lower or 'api' in endpoint_lower:
                 return 'Get API Documentation'
-            elif 'order' in endpoint_lower:
-                return 'Get Order Details'
-            elif 'user' in endpoint_lower or 'customer' in endpoint_lower:
-                return 'Get User Info'
-            elif 'car' in endpoint_lower or 'vehicle' in endpoint_lower:
-                return 'Get Vehicle Details'
-            elif 'notification' in endpoint_lower:
-                return 'Get Notifications'
             else:
-                operation = self._extract_operation_from_endpoint(endpoint, target_service)
-                return f'Get {operation}' if operation else 'Get Resource'
-                
+                return 'Get Resource'
         elif method_upper == 'PUT':
-            if 'order' in endpoint_lower:
-                return 'Update Order'
-            elif 'user' in endpoint_lower or 'customer' in endpoint_lower:
-                return 'Update User'
-            elif 'car' in endpoint_lower or 'vehicle' in endpoint_lower:
-                return 'Update Vehicle'
-            elif 'notification' in endpoint_lower:
-                return 'Update Notification'
-            else:
-                operation = self._extract_operation_from_endpoint(endpoint, target_service)
-                return f'Update {operation}' if operation else 'Update Resource'
-                
+            return 'Update Resource'
         elif method_upper == 'DELETE':
-            if 'order' in endpoint_lower:
-                return 'Cancel Order'
-            elif 'user' in endpoint_lower or 'customer' in endpoint_lower:
-                return 'Delete User'
-            elif 'car' in endpoint_lower or 'vehicle' in endpoint_lower:
-                return 'Remove Vehicle'
-            elif 'notification' in endpoint_lower:
-                return 'Delete Notification'
-            else:
-                operation = self._extract_operation_from_endpoint(endpoint, target_service)
-                return f'Delete {operation}' if operation else 'Delete Resource'
-        
-        # Fallback logic for other methods
-        method_upper = http_method.upper()
-        endpoint_lower = endpoint.lower()
-        
-        # Fallback logic for each method type
-        if method_upper in ['POST', 'GET', 'PUT', 'DELETE']:
-            operation = self._extract_operation_from_endpoint(endpoint, target_service)
-            if method_upper == 'POST':
-                return f'Create {operation}' if operation else 'Create Resource'
-            elif method_upper == 'GET':
-                return f'Get {operation}' if operation else 'Get Resource'
-            elif method_upper == 'PUT':
-                return f'Update {operation}' if operation else 'Update Resource'
-            elif method_upper == 'DELETE':
-                return f'Delete {operation}' if operation else 'Delete Resource'
+            return 'Delete Resource'
+        elif method_upper == 'PATCH':
+            return 'Patch Resource'
         
         # Fallback for other methods
         operation = self._extract_operation_from_endpoint(endpoint, target_service)
@@ -636,22 +575,12 @@ class SequenceDetector:
         if 'http' in endpoint:
             path = endpoint.split('/', 3)[-1] if '/' in endpoint else endpoint
         
-        # Service-specific operation mapping
-        if 'CarOrderService' in service:
-            if '/order' in path.lower():
-                if '<guid>' in path or '<id>' in path:
-                    return 'Order'  # Order by ID
-                else:
-                    return 'Orders'  # Order collection
-        elif 'CarListingService' in service:
-            if '/car' in path.lower():
-                if '<id>' in path:
-                    return 'Car'  # Car by ID
-                else:
-                    return 'Cars'  # Car collection
-        elif 'CarNotificationService' in service:
-            if '/notification' in path.lower():
-                return 'Notifications'
+        # Look for meaningful path segments
+        path_parts = path.split('/')
+        for part in path_parts:
+            if part and len(part) > 3 and not part.isdigit() and not part.startswith('{'):
+                # Convert to title case for display
+                return part.replace('-', ' ').replace('_', ' ').title()
         
         # Generic operations
         if 'swagger' in path.lower():
@@ -693,14 +622,15 @@ class SequenceDetector:
         if method_lower in context_lower:
             return True
             
-        # Contextual relevance mapping
+        # Generic context relevance mapping
         context_keywords = {
-            'login': ['login', 'authenticate', 'signin', 'auth', 'credential'],
-            'order': ['order', 'purchase', 'buy', 'cart', 'checkout', 'payment'],
-            'car': ['car', 'vehicle', 'listing', 'inventory', 'catalog'],
-            'user': ['user', 'customer', 'profile', 'account', 'register'],
-            'notification': ['notify', 'alert', 'message', 'email', 'send'],
-            'search': ['search', 'find', 'query', 'filter', 'get']
+            'api': ['api', 'endpoint', 'http', 'rest', 'service'],
+            'data': ['data', 'model', 'entity', 'table', 'database'],
+            'auth': ['auth', 'login', 'authenticate', 'credential', 'security'],
+            'search': ['search', 'find', 'query', 'filter', 'get'],
+            'create': ['create', 'add', 'insert', 'post'],
+            'update': ['update', 'modify', 'edit', 'put', 'patch'],
+            'delete': ['delete', 'remove', 'cancel', 'destroy']
         }
         
         for context_key, keywords in context_keywords.items():
@@ -743,14 +673,15 @@ class SequenceDetector:
         if self._is_relevant_to_context(method, context):
             return True
             
-        # Check endpoint relevance
+        # Check endpoint relevance using generic patterns
         query_patterns = {
-            'login': ['/auth', '/login', '/signin', '/user'],
-            'order': ['/order', '/purchase', '/cart', '/payment', '/checkout'],
-            'car': ['/car', '/vehicle', '/listing', '/inventory'],
-            'user': ['/user', '/customer', '/profile', '/account'],
-            'notification': ['/notification', '/alert', '/message'],
-            'api': ['/api', '/swagger', '/docs']
+            'api': ['/api', '/swagger', '/docs', '/openapi'],
+            'data': ['/data', '/model', '/entity', '/table'],
+            'auth': ['/auth', '/login', '/signin', '/user', '/account'],
+            'search': ['/search', '/find', '/query', '/filter'],
+            'create': ['/create', '/add', '/insert', '/new'],
+            'update': ['/update', '/edit', '/modify', '/change'],
+            'delete': ['/delete', '/remove', '/cancel', '/destroy']
         }
         
         for query_term, patterns in query_patterns.items():

@@ -230,38 +230,32 @@ class RepositoryFilter:
         
         logger.info(f"Inferring repository from service query: {query}")
         
-        # Map common service names to repository identifiers
-        service_repo_mapping = {
-            'listing service': 'car-listing-service',
-            'car listing service': 'car-listing-service',
-            'car service': 'car-listing-service',
-            'listing': 'car-listing-service',
-            'car': 'car-listing-service',
-            'order service': 'car-order-service',
-            'car order service': 'car-order-service',
-            'order': 'car-order-service',
-            'web client': 'car-web-client',
-            'car web client': 'car-web-client',
-            'frontend': 'car-web-client',
-            'client': 'car-web-client'
-        }
+        # Extract potential repository names from the query
+        # Look for patterns like "open swe", "my-project", "service-name"
+        words = query_lower.split()
         
-        # Check for service names in the query
-        for service_name, repo_id in service_repo_mapping.items():
-            if service_name in query_lower:
-                logger.info(f"Found service match: '{service_name}' -> '{repo_id}'")
-                inferred_repos.append(repo_id)
-                break  # Use the first match
+        # Look for repository-like patterns (words that could be repo names)
+        for word in words:
+            # Skip common words and very short terms
+            if len(word) < 3 or word in ['the', 'and', 'or', 'for', 'with', 'from', 'to', 'in', 'on', 'at', 'by', 'of', 'a', 'an']:
+                continue
+            
+            # Clean up the word (remove special characters)
+            clean_word = re.sub(r'[^\w\-_]', '', word)
+            if len(clean_word) >= 3:
+                # Check if this looks like a repository name
+                if '-' in clean_word or '_' in clean_word or clean_word.islower():
+                    logger.info(f"Found potential repository name: '{clean_word}'")
+                    inferred_repos.append(clean_word)
         
-        # If no specific service found, try to extract from context
+        # If no specific patterns found, try to extract from context
         if not inferred_repos:
-            logger.info("No specific service name found, checking for architecture context...")
+            logger.info("No specific repository patterns found, checking for architecture context...")
             # Look for architecture-related terms that might indicate a specific service
-            architecture_terms = ['architecture', 'system design', 'service architecture']
+            architecture_terms = ['architecture', 'system design', 'service architecture', 'sequence', 'diagram']
             if any(term in query_lower for term in architecture_terms):
-                # Default to car-listing-service for architecture queries
-                logger.info("Architecture context detected, defaulting to car-listing-service")
-                inferred_repos.append('car-listing-service')
+                # Don't default to any specific service - let the search find what's available
+                logger.info("Architecture context detected, will search available repositories")
         
         logger.info(f"Repository inference result: {inferred_repos}")
         return inferred_repos

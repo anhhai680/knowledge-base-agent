@@ -924,9 +924,9 @@ class MermaidGenerator:
             interactions = pattern.get('interactions', [])
             for interaction in interactions:
                 caller = interaction.get('caller', 'Unknown')
-                target = interaction.get('target', 'Unknown')
+                callee = interaction.get('callee', 'Unknown')  # Fixed: was 'target'
                 participants.add(caller)
-                participants.add(target)
+                participants.add(callee)
         
         # Add participant declarations
         for participant in sorted(list(participants))[:10]:  # Limit participants
@@ -937,11 +937,11 @@ class MermaidGenerator:
             interactions = pattern.get('interactions', [])
             for interaction in interactions[:15]:  # Limit interactions
                 caller = interaction.get('caller', 'Unknown')
-                target = interaction.get('target', 'Unknown')
+                callee = interaction.get('callee', 'Unknown')  # Fixed: was 'target'
                 method = interaction.get('method', 'call')
                 
-                if caller in participants and target in participants:
-                    mermaid_lines.append(f"    {caller}->>+{target}: {method}")
-                    mermaid_lines.append(f"    {target}-->>-{caller}: response")
+                if caller in participants and callee in participants:
+                    mermaid_lines.append(f"    {caller}->>+{callee}: {method}")
+                    mermaid_lines.append(f"    {callee}-->>-{caller}: response")
         
         return '\n'.join(mermaid_lines)

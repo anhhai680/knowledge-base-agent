@@ -66,6 +66,25 @@ class DiagramAgent:
             'component': ['component diagram', 'module diagram', 'service diagram']
         }
     
+    def _detect_language_from_path(self, file_path: str) -> str:
+        """Detect programming language from file path"""
+        if not file_path:
+            return 'unknown'
+        fp = file_path.lower()
+        if fp.endswith('.py'):
+            return 'python'
+        if fp.endswith(('.js', '.jsx')):
+            return 'javascript'
+        if fp.endswith(('.ts', '.tsx')):
+            return 'typescript'
+        if fp.endswith('.cs'):
+            return 'csharp'
+        if fp.endswith('.java'):
+            return 'java'
+        if fp.endswith('.md'):
+            return 'markdown'
+        return 'unknown'
+    
     def process_query(self, query: str) -> Dict[str, Any]:
         """
         Process diagram request with enhanced capabilities
@@ -475,34 +494,39 @@ class DiagramAgent:
         More lenient repository filtering that looks for related services
         """
         filtered = []
-        service_families = {
-            'car-listing-service': ['car', 'listing', 'service'],
-            'car-order-service': ['car', 'order', 'service'],
-            'car-web-client': ['car', 'web', 'client', 'frontend']
-        }
+        
+        # Dynamic service family detection based on repository names
+        # Instead of hardcoding specific service families, analyze repository names dynamically
+        service_families = {}
+        
+        for repo in repositories:
+            # Extract meaningful terms from repository name
+            repo_terms = repo.lower().replace('-', ' ').replace('_', ' ').split()
+            # Filter out common words and keep meaningful terms
+            meaningful_terms = [term for term in repo_terms if len(term) > 2 and term not in ['the', 'and', 'for', 'with', 'from']]
+            if meaningful_terms:
+                service_families[repo] = meaningful_terms
         
         for doc in documents:
             doc_repo = doc.metadata.get('repository', '')
             if doc_repo:
                 # Check if document is from a related service
-                for repo in repositories:
-                    if repo in service_families:
-                        family_keywords = service_families[repo]
-                        # Check if any family keywords appear in the repository URL or document content
-                        if any(keyword in doc_repo.lower() for keyword in family_keywords):
-                            filtered.append(doc)
-                            break
+                for repo, family_keywords in service_families.items():
+                    # Check if any family keywords appear in the repository URL or document content
+                    if any(keyword in doc_repo.lower() for keyword in family_keywords):
+                        filtered.append(doc)
+                        break
         
         return filtered
     
     def _get_preferred_file_types(self, diagram_type: str) -> List[str]:
         """Get preferred file types for specific diagram types"""
         type_mapping = {
-            'sequence': ['py', 'js', 'ts', 'cs', 'java'],
-            'flowchart': ['py', 'js', 'ts', 'cs', 'java', 'cpp'],
-            'class': ['py', 'js', 'ts', 'cs', 'java', 'cpp'],
-            'er': ['cs', 'java', 'sql', 'py'],
-            'component': ['cs', 'java', 'js', 'ts', 'py']
+            'sequence': ['py', 'js', 'ts', 'cs'],
+            'flowchart': ['py', 'js', 'ts', 'cs'],
+            'class': ['py', 'js', 'ts', 'cs'],
+            'er': ['cs', 'sql', 'py'],
+            'component': ['cs', 'js', 'ts', 'py']
         }
         return type_mapping.get(diagram_type, [])
     
@@ -529,21 +553,29 @@ class DiagramAgent:
             architecture_terms = ['service', 'controller', 'repository', 'component', 'module', 'interface', 'class', 'method', 'api', 'endpoint']
             meaningful_terms.extend([term for term in architecture_terms if term not in meaningful_terms])
         
-        # Special handling for listing service requests
-        if 'listing' in query.lower() or 'list' in query.lower():
-            listing_terms = ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud']
-            meaningful_terms.extend([term for term in listing_terms if term not in meaningful_terms])
+        # Dynamic domain-specific term extraction based on query content
+        # Instead of hardcoding specific domains, extract terms dynamically from the query
+        domain_indicators = {
+            'listing': ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud'],
+            'order': ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud'],
+            'user': ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud'],
+            'product': ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud'],
+            'payment': ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud'],
+            'auth': ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud'],
+            'notification': ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud']
+        }
         
-        # Special handling for car-related services
-        if 'car' in query.lower():
-            car_terms = ['car', 'listing', 'order', 'service', 'controller', 'repository', 'model']
-            meaningful_terms.extend([term for term in car_terms if term not in meaningful_terms])
+        # Add domain-specific terms based on what's actually in the query
+        for domain, terms in domain_indicators.items():
+            if domain in query.lower():
+                meaningful_terms.extend([term for term in terms if term not in meaningful_terms])
         
-        # Prioritize service-specific terms at the beginning
-        service_terms = ['listing', 'car', 'order', 'service']
+        # Prioritize domain-specific terms that appear in the query
+        # This makes the prioritization dynamic rather than hardcoded
         prioritized_terms = []
-        for term in service_terms:
-            if term in meaningful_terms:
+        for term in meaningful_terms[:]:
+            # Prioritize terms that are likely to be domain-specific based on context
+            if term in ['service', 'controller', 'repository', 'model', 'entity']:
                 prioritized_terms.append(term)
                 meaningful_terms.remove(term)
         
