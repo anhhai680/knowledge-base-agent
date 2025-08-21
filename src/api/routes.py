@@ -250,6 +250,8 @@ async def initialize_components():
         from ..config.agent_config import AgentConfig, AGENT_CONFIG_PRESETS
         from ..agents.query_optimizer import AdvancedQueryOptimizer
         from ..agents.response_quality_enhancer import EnhancedResponseQualityEnhancer
+        from ..config.query_optimization_config import DEFAULT_QUERY_OPTIMIZATION_CONFIG
+        from ..config.response_quality_config import DEFAULT_RESPONSE_QUALITY_CONFIG
         
         # Initialize diagram handler (legacy support)
         diagram_handler = DiagramHandler(vector_store, llm)
@@ -268,13 +270,13 @@ async def initialize_components():
                 response_enhancer = None
                 
                 try:
-                    query_optimizer = AdvancedQueryOptimizer()
+                    query_optimizer = AdvancedQueryOptimizer(llm, DEFAULT_QUERY_OPTIMIZATION_CONFIG.dict())
                     logger.debug("Query optimizer initialized")
                 except Exception as e:
                     logger.warning(f"Query optimizer initialization failed: {str(e)}")
                 
                 try:
-                    response_enhancer = EnhancedResponseQualityEnhancer()
+                    response_enhancer = EnhancedResponseQualityEnhancer(llm, DEFAULT_RESPONSE_QUALITY_CONFIG.dict())
                     logger.debug("Response enhancer initialized") 
                 except Exception as e:
                     logger.warning(f"Response enhancer initialization failed: {str(e)}")
