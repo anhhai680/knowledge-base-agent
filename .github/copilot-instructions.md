@@ -127,7 +127,9 @@ pytest tests/test_diagram_features.py
 ### Model Configuration
 ```bash
 # Note: switch_models.py requires dependencies to be installed
-# Check current model configuration (after pip install)
+# Note: switch_models.py requires dependencies from requirements.txt
+pip install -r requirements.txt
+# Check current model configuration
 python switch_models.py show
 
 # Switch to Ollama (local, no API key required)
