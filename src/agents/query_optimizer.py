@@ -154,6 +154,56 @@ class AdvancedQueryOptimizer:
                 metadata={"error": str(e)}
             )
     
+    def optimize_for_diagrams(self, query: str) -> str:
+        """
+        Optimize query specifically for diagram generation
+        
+        Args:
+            query: Original query requesting diagram generation
+            
+        Returns:
+            Optimized query string for diagram generation
+        """
+        try:
+            logger.info(f"Optimizing query for diagram generation: {query[:100]}...")
+            
+            # Check if this is already a diagram request
+            diagram_indicators = ['diagram', 'visualize', 'show', 'draw', 'create', 'generate', 'architecture', 'system design']
+            if any(indicator in query.lower() for indicator in diagram_indicators):
+                logger.debug("Query already contains diagram indicators, minimal optimization needed")
+                return query
+            
+            # Add diagram-specific terms if not present
+            enhanced_query = query
+            
+            # Add architecture terms for service-related queries
+            if any(term in query.lower() for term in ['service', 'controller', 'repository', 'component']):
+                if 'architecture' not in query.lower():
+                    enhanced_query += " architecture"
+                if 'diagram' not in query.lower():
+                    enhanced_query += " diagram"
+            
+            # Add visualization terms for flow-related queries
+            if any(term in query.lower() for term in ['flow', 'sequence', 'interaction', 'workflow']):
+                if 'diagram' not in query.lower():
+                    enhanced_query += " diagram"
+                if 'visualize' not in query.lower():
+                    enhanced_query += " visualize"
+            
+            # Add component terms for system-related queries
+            if any(term in query.lower() for term in ['system', 'module', 'component']):
+                if 'component' not in query.lower():
+                    enhanced_query += " component"
+                if 'diagram' not in query.lower():
+                    enhanced_query += " diagram"
+            
+            logger.info(f"Query optimized for diagrams: {query[:50]} -> {enhanced_query[:50]}")
+            return enhanced_query
+            
+        except Exception as e:
+            logger.warning(f"Diagram optimization failed: {str(e)}, returning original query")
+            return query
+    
     def _apply_expansion_strategy(self, query: str, semantic_analysis) -> List[str]:
         """Apply query expansion strategy"""
         expanded_queries = [query]

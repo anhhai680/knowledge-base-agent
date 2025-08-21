@@ -164,6 +164,85 @@ class EnhancedResponseQualityEnhancer:
                 metadata={"error": str(e)}
             )
     
+    def enhance_diagram_response(self, diagram_result: Dict[str, Any], query: str, diagram_type: str) -> str:
+        """
+        Enhance diagram generation response with quality improvements
+        
+        Args:
+            diagram_result: Result from diagram generation
+            query: Original user query
+            diagram_type: Type of diagram generated
+            
+        Returns:
+            Enhanced response string
+        """
+        try:
+            logger.info(f"Enhancing diagram response for {diagram_type} diagram")
+            
+            # Extract key information from diagram result
+            answer = diagram_result.get("analysis_summary", "")
+            mermaid_code = diagram_result.get("mermaid_code", "")
+            source_docs = diagram_result.get("source_documents", [])
+            status = diagram_result.get("status", "success")
+            
+            # Start with the original answer
+            enhanced_response = answer
+            
+            # Add diagram type context if not present
+            if diagram_type and diagram_type not in enhanced_response.lower():
+                enhanced_response = f"Generated {diagram_type} diagram: {enhanced_response}"
+            
+            # Add mermaid code information if available
+            if mermaid_code:
+                enhanced_response += f"\n\n**Mermaid Diagram Code Available**: The diagram has been generated and can be rendered using Mermaid.js."
+                
+                # Add usage instructions for different diagram types
+                if diagram_type == "component":
+                    enhanced_response += "\n\n**Component Architecture**: This diagram shows the system components, their relationships, and dependencies."
+                elif diagram_type == "sequence":
+                    enhanced_response += "\n\n**Sequence Flow**: This diagram shows the interaction flow between different components over time."
+                elif diagram_type == "class":
+                    enhanced_response += "\n\n**Class Structure**: This diagram shows the object-oriented structure and relationships."
+                elif diagram_type == "flowchart":
+                    enhanced_response += "\n\n**Process Flow**: This diagram shows the decision points and process flow."
+                elif diagram_type == "er":
+                    enhanced_response += "\n\n**Data Model**: This diagram shows the entity relationships and database structure."
+            
+            # Add source document information
+            if source_docs:
+                doc_count = len(source_docs)
+                enhanced_response += f"\n\n**Source Analysis**: Generated from {doc_count} relevant code files and documents."
+                
+                # Add repository information if available
+                repositories = set()
+                for doc in source_docs:
+                    if hasattr(doc, 'metadata') and doc.metadata:
+                        repo = doc.metadata.get('repository', '')
+                        if repo:
+                            repo_name = repo.split('/')[-1] if '/' in repo else repo
+                            repositories.add(repo_name)
+                
+                if repositories:
+                    repo_list = ", ".join(sorted(repositories))
+                    enhanced_response += f" **Repositories**: {repo_list}"
+            
+            # Add status-specific information
+            if status == "warning":
+                enhanced_response += "\n\n⚠️ **Note**: Some patterns were limited, but the diagram provides a useful overview of the available architecture."
+            elif status == "error":
+                enhanced_response += "\n\n❌ **Error**: Diagram generation encountered issues. Please check the source code or try a different approach."
+            
+            # Add usage tips
+            enhanced_response += "\n\n💡 **Usage**: You can copy the Mermaid code above into any Mermaid-compatible editor (GitHub, GitLab, Mermaid Live Editor) to view and customize the diagram."
+            
+            logger.info(f"Diagram response enhanced successfully")
+            return enhanced_response
+            
+        except Exception as e:
+            logger.warning(f"Diagram response enhancement failed: {str(e)}")
+            # Return original answer if enhancement fails
+            return diagram_result.get("analysis_summary", "Diagram generated successfully")
+    
     def _assess_response_quality(self, response: str, context: List, question: str) -> QualityAssessment:
         """Assess the quality of a response"""
         try:

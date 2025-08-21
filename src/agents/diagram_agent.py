@@ -52,16 +52,18 @@ class DiagramAgent:
             'flowchart': self._generate_flowchart,
             'class': self._generate_class_diagram,
             'er': self._generate_er_diagram,
-            'component': self._generate_component_diagram
+            'component': self._generate_component_diagram,
+            'architecture': self._generate_architecture_diagram
         }
         
         # Supported diagram types and their detection keywords (order matters - more specific first)
         self.diagram_type_keywords = {
+            'architecture': ['architecture', 'architecture diagram', 'system architecture', 'system design', 'architectural', 'service architecture'],
             'flowchart': ['flowchart', 'flow chart', 'process flow', 'workflow', 'decision tree', 'control flow'],
             'sequence': ['sequence', 'interaction', 'method call', 'interaction diagram', 'sequence diagram'],
             'class': ['class diagram', 'class structure', 'object model', 'inheritance', 'composition', 'uml class'],
             'er': ['entity relationship', 'er diagram', 'database schema', 'data model', 'entity model'],
-            'component': ['component diagram', 'architecture', 'system architecture', 'module diagram', 'service diagram']
+            'component': ['component diagram', 'module diagram', 'service diagram']
         }
     
     def process_query(self, query: str) -> Dict[str, Any]:
@@ -155,14 +157,20 @@ class DiagramAgent:
             intent = self.diagram_query_optimizer.extract_diagram_intent(query)
             search_terms = self._extract_semantic_search_terms(query, intent)
             
-            # Perform multi-strategy search with enhanced filtering
-            all_results = self._multi_strategy_search(search_terms, repositories, intent)
+            # If specific repository is mentioned, prioritize it heavily
+            if repositories:
+                logger.info(f"Repository-specific query detected: {repositories}")
+                # Use strict repository filtering
+                all_results = self._strict_repository_search(search_terms, repositories, intent)
+            else:
+                # Fall back to multi-strategy search
+                all_results = self._multi_strategy_search(search_terms, repositories, intent)
             
             if not all_results:
                 logger.warning("No results found in enhanced code retrieval")
                 return []
             
-            # Enhanced result processing
+            # Enhanced result processing with strict repository filtering
             processed_results = self._enhanced_result_processing(all_results, query, intent)
             
             logger.info(f"Enhanced retrieval: {len(processed_results)} relevant documents found")
@@ -231,22 +239,113 @@ class DiagramAgent:
         
         return all_results
     
+    def _strict_repository_search(self, search_terms: List[str], repositories: List[str], intent: Dict[str, Any]) -> List[Document]:
+        """
+        Perform a strict repository-specific search.
+        This method prioritizes results from the specified repositories and filters out others.
+        """
+        results = []
+        all_errors = []
+        
+        logger.info(f"Performing strict repository search for repositories: {repositories}")
+        logger.info(f"Search terms: {search_terms}")
+        
+        for repo in repositories:
+            try:
+                # Search without filtering first, then filter results
+                search_query = search_terms[0] if search_terms else "service"
+                
+                logger.info(f"Searching with query: '{search_query}' for repository: {repo}")
+                # Search with a larger k to get more candidates, then filter
+                repo_results = self.vectorstore.similarity_search(search_query, k=50)
+                
+                # Filter results by repository
+                filtered_results = []
+                for result in repo_results:
+                    result_repo = result.metadata.get('repository', '')
+                    # Check if the repository name is contained in the result repository
+                    repo_name = repo.split('/')[-1] if '/' in repo else repo
+                    if repo_name.lower() in result_repo.lower():
+                        filtered_results.append(result)
+                
+                logger.info(f"Found {len(repo_results)} total results, {len(filtered_results)} from repository {repo}")
+                
+                # Log some sample results for debugging
+                for i, result in enumerate(filtered_results[:3]):
+                    result_repo = result.metadata.get('repository', 'unknown')
+                    logger.debug(f"Result {i+1}: {result_repo} - {result.metadata.get('file_path', 'unknown')}")
+                
+                # Filter by diagram intent if available
+                if intent.get('preferred_type'):
+                    intent_filtered = self._filter_by_diagram_intent(filtered_results, intent)
+                    results.extend(intent_filtered)
+                    logger.info(f"After intent filtering: {len(intent_filtered)} results")
+                else:
+                    results.extend(filtered_results)
+                    
+            except Exception as e:
+                all_errors.append(f"Strict repository search for {repo}: {str(e)}")
+                logger.warning(f"Strict repository search failed for {repo}: {str(e)}")
+        
+        logger.info(f"Total results from strict repository search: {len(results)}")
+        
+        # If no results from strict search, try a more lenient approach
+        if not results and repositories:
+            logger.warning(f"Strict repository search failed for all repositories. Trying lenient search...")
+            try:
+                # Try to search with just the repository name as a search term
+                for repo in repositories:
+                    repo_name = repo.split('/')[-1] if '/' in repo else repo
+                    logger.info(f"Trying lenient search for repository: {repo_name}")
+                    
+                    # Search with repository name as part of the query
+                    lenient_query = f"{repo_name} service architecture"
+                    lenient_results = self.vectorstore.similarity_search(lenient_query, k=30)
+                    
+                    # Filter by repository (more lenient)
+                    for result in lenient_results:
+                        result_repo = result.metadata.get('repository', '')
+                        if repo_name.lower() in result_repo.lower():
+                            results.append(result)
+                    
+                    if results:
+                        logger.info(f"Lenient search found {len(results)} results")
+                        break
+                        
+            except Exception as e:
+                logger.warning(f"Lenient search also failed: {str(e)}")
+        
+        # If still no results, fall back to multi-strategy search
+        if not results and repositories:
+            logger.warning(f"All repository search strategies failed. Falling back to multi-strategy search for terms: {search_terms}")
+            return self._multi_strategy_search(search_terms, repositories, intent)
+        
+        return results
+    
     def _search_repository_with_context(self, repository: str, search_terms: List[str], intent: Dict[str, Any]) -> List[Document]:
         """Search within specific repository with context awareness"""
         results = []
         
         for term in search_terms:
             try:
-                # Add repository filter to search
-                search_query = f"{term} repository:{repository}"
-                repo_results = self.vectorstore.similarity_search(search_query, k=15)
+                # Search without filtering first, then filter results
+                repo_results = self.vectorstore.similarity_search(term, k=30)
+                
+                # Filter results by repository
+                filtered_results = []
+                for result in repo_results:
+                    result_repo = result.metadata.get('repository', '')
+                    # Check if the repository name is contained in the result repository
+                    repo_name = repository.split('/')[-1] if '/' in repository else repository
+                    if repo_name.lower() in result_repo.lower():
+                        filtered_results.append(result)
                 
                 # Filter by diagram intent if available
                 if intent.get('preferred_type'):
-                    filtered_results = self._filter_by_diagram_intent(repo_results, intent)
-                    results.extend(filtered_results)
+                    intent_filtered = self._filter_by_diagram_intent(filtered_results, intent)
+                    results.extend(intent_filtered)
                 else:
-                    results.extend(repo_results)
+                    results.extend(filtered_results)
                     
             except Exception as e:
                 logger.warning(f"Repository search failed for {repository}: {str(e)}")
@@ -354,7 +453,15 @@ class DiagramAgent:
         # Apply repository filtering if specified
         repositories = self.repository_filter.extract_repositories(query)
         if repositories:
+            logger.info(f"Applying repository filtering for: {repositories}")
             filtered_results = self.repository_filter.filter_by_repository(filtered_results, repositories)
+            logger.info(f"After repository filtering: {len(filtered_results)} documents")
+            
+            # If no results after repository filtering, try to be more lenient
+            if not filtered_results:
+                logger.warning("No results after strict repository filtering, trying lenient filtering")
+                # Try to find documents that might be from the same service family
+                filtered_results = self._lenient_repository_filtering(unique_results, repositories)
         
         # Apply file type filtering based on diagram intent
         if intent.get('preferred_type'):
@@ -362,6 +469,31 @@ class DiagramAgent:
             filtered_results = self.repository_filter.filter_by_file_type(filtered_results, preferred_file_types)
         
         return filtered_results
+    
+    def _lenient_repository_filtering(self, documents: List[Document], repositories: List[str]) -> List[Document]:
+        """
+        More lenient repository filtering that looks for related services
+        """
+        filtered = []
+        service_families = {
+            'car-listing-service': ['car', 'listing', 'service'],
+            'car-order-service': ['car', 'order', 'service'],
+            'car-web-client': ['car', 'web', 'client', 'frontend']
+        }
+        
+        for doc in documents:
+            doc_repo = doc.metadata.get('repository', '')
+            if doc_repo:
+                # Check if document is from a related service
+                for repo in repositories:
+                    if repo in service_families:
+                        family_keywords = service_families[repo]
+                        # Check if any family keywords appear in the repository URL or document content
+                        if any(keyword in doc_repo.lower() for keyword in family_keywords):
+                            filtered.append(doc)
+                            break
+        
+        return filtered
     
     def _get_preferred_file_types(self, diagram_type: str) -> List[str]:
         """Get preferred file types for specific diagram types"""
@@ -389,10 +521,36 @@ class DiagramAgent:
             meaningful_terms.extend([term for term in diagram_terms if term not in meaningful_terms])
         
         # Add technical terms that are commonly useful for diagrams
-        technical_terms = ['api', 'database', 'class', 'function', 'method', 'service', 'component', 'system']
+        technical_terms = ['api', 'database', 'class', 'function', 'method', 'service', 'component', 'system', 'controller', 'repository', 'architecture', 'design']
         meaningful_terms.extend([term for term in technical_terms if term in query.lower() and term not in meaningful_terms])
         
-        return list(set(meaningful_terms))  # Remove duplicates
+        # Special handling for architecture requests
+        if 'architecture' in query.lower() or 'system design' in query.lower():
+            architecture_terms = ['service', 'controller', 'repository', 'component', 'module', 'interface', 'class', 'method', 'api', 'endpoint']
+            meaningful_terms.extend([term for term in architecture_terms if term not in meaningful_terms])
+        
+        # Special handling for listing service requests
+        if 'listing' in query.lower() or 'list' in query.lower():
+            listing_terms = ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud']
+            meaningful_terms.extend([term for term in listing_terms if term not in meaningful_terms])
+        
+        # Special handling for car-related services
+        if 'car' in query.lower():
+            car_terms = ['car', 'listing', 'order', 'service', 'controller', 'repository', 'model']
+            meaningful_terms.extend([term for term in car_terms if term not in meaningful_terms])
+        
+        # Prioritize service-specific terms at the beginning
+        service_terms = ['listing', 'car', 'order', 'service']
+        prioritized_terms = []
+        for term in service_terms:
+            if term in meaningful_terms:
+                prioritized_terms.append(term)
+                meaningful_terms.remove(term)
+        
+        # Combine prioritized terms with other meaningful terms
+        final_terms = prioritized_terms + meaningful_terms
+        
+        return list(set(final_terms))  # Remove duplicates
     
     def _enhanced_diagram_type_detection(self, query: str, code_docs: List[Document]) -> str:
         """
@@ -550,20 +708,27 @@ class DiagramAgent:
             content = doc.page_content.strip()
             
             # Skip empty or very short documents
-            if len(content) < 20:  # Reduced threshold for testing
+            if len(content) < 10:  # Reduced threshold for better coverage
                 continue
             
             # Check for code indicators (expanded list)
             code_indicators = [
                 'def ', 'class ', 'function ', 'public ', 'private ', 'var ', 'const ', 'let ',
-                'if ', 'for ', 'while ', 'return', 'import ', 'from ', '@', '{', '}', ';'
+                'if ', 'for ', 'while ', 'return', 'import ', 'from ', '@', '{', '}', ';',
+                'namespace', 'using', 'interface', 'enum', 'struct', 'async', 'await',
+                'controller', 'service', 'repository', 'component', 'module', 'export'
             ]
             has_code = any(indicator in content for indicator in code_indicators)
             
-            # Check for markdown or documentation - allow some documentation for better testing
-            is_pure_documentation = content.startswith('#') and not any(indicator in content for indicator in code_indicators)
+            # Check for markdown or documentation - allow documentation for architecture diagrams
+            is_pure_documentation = (
+                content.startswith('#') and 
+                not any(indicator in content for indicator in code_indicators) and
+                len(content.split('\n')) < 5  # Very short pure documentation
+            )
             
             # Include document if it has code OR if it's not pure documentation
+            # For architecture diagrams, we want to be more inclusive
             if has_code or not is_pure_documentation:
                 filtered.append(doc)
         
@@ -611,27 +776,6 @@ class DiagramAgent:
                 "source_documents": self._format_source_docs(code_docs),
                 "status": "error"
             }
-    
-    def _detect_language_from_path(self, file_path: str) -> str:
-        """Detect programming language from file path"""
-        if not file_path:
-            return 'unknown'
-        
-        file_lower = file_path.lower()
-        if file_lower.endswith('.py'):
-            return 'python'
-        elif file_lower.endswith(('.js', '.jsx')):
-            return 'javascript'
-        elif file_lower.endswith(('.ts', '.tsx')):
-            return 'typescript'
-        elif file_lower.endswith(('.cs')):
-            return 'csharp'
-        elif file_lower.endswith(('.java')):
-            return 'java'
-        elif file_lower.endswith(('.md')):
-            return 'markdown'
-        else:
-            return 'unknown'
     
     def _generate_flowchart(self, code_docs: List[Document], query: str) -> Dict[str, Any]:
         """Generate flowchart diagram"""
@@ -785,6 +929,47 @@ class DiagramAgent:
                 "status": "error"
             }
     
+    def _generate_architecture_diagram(self, code_docs: List[Document], query: str) -> Dict[str, Any]:
+        """Generate architecture diagram (alias of component diagram with proper labeling)"""
+        try:
+            # 1) Build from metadata only (no content parsing) for correctness
+            meta_patterns = self.pattern_extractor.extract_architecture_from_metadata(code_docs)
+            patterns = meta_patterns
+            
+            # 2) If metadata yields nothing, fall back to code-based extraction
+            if not patterns:
+                component_patterns = self._extract_component_patterns(code_docs)
+                patterns = component_patterns
+            
+            if not patterns:
+                default_mermaid = self._create_component_diagram_mermaid([])
+                return {
+                    "analysis_summary": "No architecture components found in the code. The code may not contain clear architectural components.",
+                    "mermaid_code": default_mermaid,
+                    "diagram_type": "architecture",
+                    "source_documents": self._format_source_docs(code_docs),
+                    "status": "warning"
+                }
+            
+            mermaid_code = self._create_component_diagram_mermaid(patterns)
+            
+            return {
+                "analysis_summary": f"Generated architecture diagram showing {len(patterns)} components and dependencies found in the code.",
+                "mermaid_code": mermaid_code,
+                "diagram_type": "architecture",
+                "source_documents": self._format_source_docs(code_docs),
+                "status": "success"
+            }
+        except Exception as e:
+            logger.error(f"Architecture diagram generation failed: {str(e)}")
+            return {
+                "analysis_summary": f"Error generating architecture diagram: {str(e)}",
+                "mermaid_code": None,
+                "diagram_type": "architecture",
+                "source_documents": self._format_source_docs(code_docs),
+                "status": "error"
+            }
+    
     # Placeholder methods for pattern extraction and mermaid generation
     # These will be implemented in future tasks
     
@@ -882,7 +1067,8 @@ class DiagramAgent:
             'flowchart': 'Represents process flows and decision points',
             'class': 'Displays class structures and relationships',
             'er': 'Shows entity-relationship data models',
-            'component': 'Illustrates system architecture and components'
+            'component': 'Illustrates system architecture and components',
+            'architecture': 'High-level system architecture and component dependencies'
         }
         return descriptions.get(diagram_type, 'Unknown diagram type')
 
