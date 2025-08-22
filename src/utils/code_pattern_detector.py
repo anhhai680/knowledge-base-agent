@@ -247,10 +247,19 @@ class RepositoryFilter:
         # Look for patterns like "open swe", "my-project", "service-name"
         words = query_lower.split()
         
+        # Enhanced filtering to avoid generic terms
+        generic_terms = {
+            'the', 'and', 'or', 'for', 'with', 'from', 'to', 'in', 'on', 'at', 'by', 'of', 'a', 'an',
+            'show', 'me', 'code', 'create', 'generate', 'diagram', 'flowchart', 'sequence', 'interaction',
+            'method', 'call', 'simple', 'walk', 'through', 'explain', 'map', 'out', 'display', 'draw',
+            'visualize', 'chart', 'visualization', 'flow', 'process', 'steps', 'architecture', 'system',
+            'design', 'service', 'component', 'class', 'entity', 'relationship', 'uml', 'mermaid'
+        }
+        
         # Look for repository-like patterns (words that could be repo names)
         for word in words:
             # Skip common words and very short terms
-            if len(word) < 3 or word in ['the', 'and', 'or', 'for', 'with', 'from', 'to', 'in', 'on', 'at', 'by', 'of', 'a', 'an', 'show', 'me', 'code', 'create', 'generate', 'diagram', 'flowchart', 'sequence']:
+            if len(word) < 3 or word in generic_terms:
                 continue
             
             # Clean up the word (remove special characters)
@@ -265,8 +274,10 @@ class RepositoryFilter:
                     re.match(r'^[a-z]+[A-Z][a-zA-Z0-9]+$', clean_word) or  # camelCase
                     clean_word.islower()
                 ):
-                    logger.info(f"Found potential repository name: '{clean_word}'")
-                    inferred_repos.append(clean_word)
+                    # Additional check: ensure it's not just a generic technical term
+                    if clean_word not in generic_terms:
+                        logger.info(f"Found potential repository name: '{clean_word}'")
+                        inferred_repos.append(clean_word)
         
         # If no specific patterns found, try to extract from context
         if not inferred_repos:

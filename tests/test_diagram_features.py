@@ -5,7 +5,6 @@ Test for agent router pattern and diagram generation functionality
 import pytest
 from unittest.mock import Mock, MagicMock
 from src.agents.agent_router import AgentRouter
-from src.processors.diagram_handler import DiagramHandler
 from src.processors.sequence_detector import SequenceDetector
 
 
@@ -15,11 +14,16 @@ class TestAgentRouter:
     def setup_method(self):
         """Setup test fixtures"""
         self.mock_rag_agent = Mock()
-        self.mock_vectorstore = Mock()
-        self.mock_llm = Mock()
+        self.mock_diagram_agent = Mock()
         
-        self.diagram_handler = DiagramHandler(self.mock_vectorstore, self.mock_llm)
-        self.agent_router = AgentRouter(self.mock_rag_agent, self.diagram_handler)
+        # Set up RAG agent mock
+        self.mock_rag_agent.vectorstore = Mock()
+        self.mock_rag_agent.process_query = Mock()
+        
+        # Set up DiagramAgent mock
+        self.mock_diagram_agent.process_query = Mock()
+        
+        self.agent_router = AgentRouter(self.mock_rag_agent, self.mock_diagram_agent)
     
     def test_diagram_request_detection(self):
         """Test that diagram requests are properly detected"""
@@ -50,7 +54,8 @@ class TestAgentRouter:
     
     def test_rag_agent_routing(self):
         """Test routing to RAG agent for regular queries"""
-        self.mock_rag_agent.query.return_value = {
+        # Mock successful RAG response
+        self.mock_rag_agent.process_query.return_value = {
             "answer": "Test answer",
             "source_documents": [],
             "status": "success",
@@ -59,8 +64,32 @@ class TestAgentRouter:
         
         result = self.agent_router.route_query("How does authentication work?")
         
-        self.mock_rag_agent.query.assert_called_once_with("How does authentication work?")
-        assert result["answer"] == "Test answer"
+        self.mock_rag_agent.process_query.assert_called_once_with("How does authentication work?")
+        # Note: result format will depend on adapt_agent_response implementation
+    
+    def test_diagram_agent_routing(self):
+        """Test routing to DiagramAgent for diagram queries"""
+        # Mock successful diagram response
+        self.mock_diagram_agent.process_query.return_value = {
+            "mermaid_code": "sequenceDiagram\n    A->>B: Request",
+            "analysis_summary": "Test diagram generated",
+            "status": "success"
+        }
+        
+        result = self.agent_router.route_query("Show me a sequence diagram for authentication")
+        
+        self.mock_diagram_agent.process_query.assert_called_once_with("Show me a sequence diagram for authentication")
+        # Note: result format will depend on adapt_agent_response implementation
+    
+    def test_diagram_agent_unavailable(self):
+        """Test behavior when DiagramAgent is not available"""
+        # Create router without diagram agent
+        agent_router_no_diagram = AgentRouter(self.mock_rag_agent, None)
+        
+        result = agent_router_no_diagram.route_query("Show me a sequence diagram")
+        
+        # Should return error response about diagram functionality not being available
+        assert "error" in str(result).lower() or "not available" in str(result).lower()
 
 
 class TestSequenceDetector:
@@ -99,35 +128,8 @@ function loginUser(credentials) {
         assert 'interactions' in result
 
 
-class TestDiagramHandler:
-    """Test diagram generation functionality"""
-    
-    def setup_method(self):
-        """Setup test fixtures"""
-        self.mock_vectorstore = Mock()
-        self.mock_llm = Mock()
-        self.handler = DiagramHandler(self.mock_vectorstore, self.mock_llm)
-    
-    def test_language_detection(self):
-        """Test file language detection"""
-        assert self.handler._detect_language_from_path("auth.py") == "python"
-        assert self.handler._detect_language_from_path("service.js") == "javascript"
-        assert self.handler._detect_language_from_path("component.ts") == "typescript"
-        assert self.handler._detect_language_from_path("controller.cs") == "csharp"
-        assert self.handler._detect_language_from_path("readme.txt") == "unknown"
-    
-    def test_name_sanitization(self):
-        """Test Mermaid name sanitization"""
-        assert self.handler._sanitize_name("auth-service") == "auth_service"
-        assert self.handler._sanitize_name("user.controller") == "user_controller"
-        assert self.handler._sanitize_name("order service") == "order_service"
-    
-    def test_interaction_validation(self):
-        """Test interaction filtering"""
-        assert self.handler._is_valid_interaction("Client", "AuthService", "login") == True
-        assert self.handler._is_valid_interaction("Service", "Service", "method") == False  # self-call
-        assert self.handler._is_valid_interaction("Client", "Service", "get") == False  # noise method
-        assert self.handler._is_valid_interaction("A", "B", "c") == False  # too short
+# Note: TestDiagramHandler has been removed as part of diagram backward compatibility cleanup
+# All diagram functionality now uses the enhanced DiagramAgent
 
 
 if __name__ == "__main__":

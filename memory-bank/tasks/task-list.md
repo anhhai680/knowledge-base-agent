@@ -2,6 +2,11 @@
 
 ## Recently Completed
 
+- [TASK049] Fix Repository Search Issue ✅ COMPLETED
+  - **Status**: 100% Complete - Successfully implemented August 22, 2025
+  - **Achievement**: Resolved repository search failures caused by generic term extraction
+  - **Impact**: Eliminated search errors and improved diagram generation success rate
+
 - [TASK032] Update Main Application Integration ✅ COMPLETED
   - **Status**: 100% Complete - Successfully merged August 22, 2025 via PR #33
   - **Achievement**: Enhanced main application with comprehensive DiagramAgent validation and health monitoring
@@ -25,6 +30,10 @@
   - **Next**: Resume optimization work after diagram enhancement completion
 
 ## Pending
+
+### Critical Code Quality Issues
+- [TASK047] Simplify AgentRouter - Remove Diagram Logic Duplication - 85% Complete - AgentRouter reduced from 359 to 199 lines (45% reduction)
+- [TASK048] Break Down DiagramAgent - **35% COMPLETE** - Extracted EnhancedCodeRetriever (577 lines), reduced DiagramAgent from 1,160→752 lines
 
 ### Agents Refactoring Implementation Plan (Phase 1: Foundation Cleanup)
 - [TASK036] Remove Diagram Backward Compatibility - Remove legacy diagram handler and simplify agent router
