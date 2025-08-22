@@ -467,7 +467,6 @@ src/agents/
 
 ```python
 
-```python
 # src/agents/factory.py
 from typing import Optional, Dict, Any
 from .rag.rag_agent import RAGAgent
