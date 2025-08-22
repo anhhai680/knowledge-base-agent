@@ -6,7 +6,7 @@ supporting all modern C# language features including generics, LINQ,
 attributes, XML documentation, and more.
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 import tree_sitter as ts
 import tree_sitter_c_sharp as ts_csharp
 
@@ -14,9 +14,7 @@ from .advanced_parser import AdvancedParser
 from .semantic_element import (
     SemanticElement, 
     ElementType, 
-    SemanticPosition,
-    AccessModifier,
-    ParseResult
+    AccessModifier
 )
 from ....utils.logging import get_logger
 

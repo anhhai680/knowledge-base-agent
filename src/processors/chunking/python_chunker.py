@@ -5,13 +5,11 @@ This chunker uses AST parsing to identify Python language constructs
 and creates chunks that respect class and function boundaries.
 """
 
-from typing import List, Dict, Any
+from typing import List
 from langchain.docstore.document import Document
 
 from .base_chunker import BaseChunker, ChunkMetadata
 from .parsers.ast_parser import ASTParser, CodeElement
-import sys
-import os.path
 
 # Import the logger utility from the utils package
 from ...utils.logging import get_logger
