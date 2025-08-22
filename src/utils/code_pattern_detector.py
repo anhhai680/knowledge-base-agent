@@ -258,7 +258,13 @@ class RepositoryFilter:
             if len(clean_word) >= 3:
                 # Check if this looks like a repository name
                 # Only consider words that have repository-like characteristics
-                if ('-' in clean_word or '_' in clean_word) and clean_word.islower():
+                # Accept words that look like repository names: hyphen/underscore, or camelCase/PascalCase, or all lowercase
+                if (
+                    ('-' in clean_word or '_' in clean_word) or
+                    re.match(r'^[A-Z][a-zA-Z0-9]+$', clean_word) or  # PascalCase
+                    re.match(r'^[a-z]+[A-Z][a-zA-Z0-9]+$', clean_word) or  # camelCase
+                    clean_word.islower()
+                ):
                     logger.info(f"Found potential repository name: '{clean_word}'")
                     inferred_repos.append(clean_word)
         
