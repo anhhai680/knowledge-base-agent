@@ -30,7 +30,12 @@ class AgentRouter:
         self.rag_agent = rag_agent
         self.diagram_handler = diagram_handler
         self.diagram_agent = diagram_agent
+        
+        # Create a validated copy of the configuration to prevent direct modification
         self.agent_config = agent_config or DEFAULT_AGENT_CONFIG
+        self.agent_config = self.agent_config.validate_for_router(
+            diagram_agent_available=diagram_agent is not None
+        )
         
         # Pre-compile regex patterns for better performance
         self._diagram_patterns = self._compile_diagram_patterns()
@@ -40,11 +45,12 @@ class AgentRouter:
                    f"handler={'Yes'}, agent={'Yes' if diagram_agent else 'No'}, "
                    f"preferred={self.agent_config.routing.preferred_diagram_agent}")
         
-        # Validate configuration
-        if (self.agent_config.routing.preferred_diagram_agent == DiagramAgentType.DIAGRAM_AGENT 
-            and not self.diagram_agent):
-            logger.warning("DiagramAgent preferred but not provided, falling back to DiagramHandler")
-            self.agent_config.routing.preferred_diagram_agent = DiagramAgentType.DIAGRAM_HANDLER
+        # Log configuration validation if fallback occurred
+        if (agent_config and 
+            agent_config.routing.preferred_diagram_agent == DiagramAgentType.DIAGRAM_AGENT 
+            and not diagram_agent):
+            logger.info("Configuration validated: DiagramAgent preferred but not available, "
+                       "using validated configuration with DiagramHandler fallback")
     
     def route_query(self, question: str) -> AgentResponse:
         """Route query to appropriate agent based on content analysis"""
@@ -473,3 +479,37 @@ class AgentRouter:
             
         except Exception as e:
             raise Exception(f"Both agents failed - Primary: {original_error}, Fallback: {str(e)}")
+    
+    def update_configuration(self, new_config: AgentConfig) -> None:
+        """
+        Safely update the router configuration by creating a validated copy
+        
+        Args:
+            new_config: New configuration to apply
+            
+        Note:
+            This method creates a copy of the configuration to prevent
+            direct modification of the original configuration object.
+        """
+        # Create a validated copy of the new configuration
+        validated_config = new_config.validate_for_router(
+            diagram_agent_available=self.diagram_agent is not None
+        )
+        
+        # Update the router's configuration
+        self.agent_config = validated_config
+        
+        # Log the configuration update
+        logger.info(f"Configuration updated: preferred_diagram_agent={validated_config.routing.preferred_diagram_agent}")
+        
+        # Re-compile patterns if needed (in case configuration affects pattern compilation)
+        self._diagram_patterns = self._compile_diagram_patterns()
+    
+    def get_current_configuration(self) -> AgentConfig:
+        """
+        Get a copy of the current configuration
+        
+        Returns:
+            Copy of the current configuration to prevent external modification
+        """
+        return self.agent_config.copy()

@@ -5,8 +5,9 @@ This module provides configuration settings for agent routing, including
 agent selection preferences and backward compatibility options.
 """
 
+import copy
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
 class DiagramAgentType(str, Enum):
@@ -67,6 +68,28 @@ class AgentRoutingConfig(BaseModel):
         default=True,
         description="Enable multiple diagram type support in DiagramAgent"
     )
+    
+    def copy(self) -> 'AgentRoutingConfig':
+        """Create a deep copy of the routing configuration"""
+        return copy.deepcopy(self)
+    
+    def validate_diagram_agent_preference(self, diagram_agent_available: bool) -> 'AgentRoutingConfig':
+        """
+        Validate and potentially adjust diagram agent preference based on availability
+        
+        Args:
+            diagram_agent_available: Whether DiagramAgent is available
+            
+        Returns:
+            New configuration instance with validated preferences
+        """
+        config_copy = self.copy()
+        
+        if (config_copy.preferred_diagram_agent == DiagramAgentType.DIAGRAM_AGENT 
+            and not diagram_agent_available):
+            config_copy.preferred_diagram_agent = DiagramAgentType.DIAGRAM_HANDLER
+            
+        return config_copy
 
 class AgentConfig(BaseModel):
     """Overall agent configuration"""
@@ -85,6 +108,34 @@ class AgentConfig(BaseModel):
         default=False,
         description="Enable migration mode for gradual transition to new agents"
     )
+    
+    def copy(self) -> 'AgentConfig':
+        """Create a deep copy of the agent configuration"""
+        return copy.deepcopy(self)
+    
+    def validate_for_router(self, diagram_agent_available: bool) -> 'AgentConfig':
+        """
+        Validate configuration for use in AgentRouter
+        
+        Args:
+            diagram_agent_available: Whether DiagramAgent is available
+            
+        Returns:
+            New validated configuration instance
+        """
+        config_copy = self.copy()
+        config_copy.routing = config_copy.routing.validate_diagram_agent_preference(
+            diagram_agent_available
+        )
+        return config_copy
+    
+    @field_validator('routing')
+    @classmethod
+    def validate_routing_config(cls, v):
+        """Ensure routing configuration is properly initialized"""
+        if isinstance(v, dict):
+            return AgentRoutingConfig(**v)
+        return v
 
 # Default configuration
 DEFAULT_AGENT_CONFIG = AgentConfig()
