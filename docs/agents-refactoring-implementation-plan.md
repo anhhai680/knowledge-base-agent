@@ -466,7 +466,6 @@ src/agents/
 **Implementation Example:**
 
 ```python
-**Implementation Example:**
 
 ```python
 # src/agents/factory.py
