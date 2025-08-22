@@ -1591,7 +1591,6 @@ class TestResponseQuality:
         assert result.contains_hallucination
         assert result.confidence_score > 0.8
 ```
-        """Test that query response times are within acceptable limits"""
         query = "What is the purpose of this codebase?"
         response_times = []
         
