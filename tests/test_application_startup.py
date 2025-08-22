@@ -152,7 +152,8 @@ class TestHealthCheckEnhancements:
     
     def test_health_check_has_diagram_agent_status(self):
         """Test that health check includes DiagramAgent status checks"""
-        with open("/home/runner/work/knowledge-base-agent/knowledge-base-agent/src/api/routes.py", "r") as f:
+        routes_path = os.path.join(os.path.dirname(__file__), "..", "src", "api", "routes.py")
+        with open(routes_path, "r") as f:
             content = f.read()
         
         # Check for DiagramAgent health check additions
