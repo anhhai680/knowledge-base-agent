@@ -355,22 +355,30 @@ class DiagramAgent:
             # Search with repository context
             repo_results = self.vectorstore.similarity_search(search_query, k=15)
             
-            # Filter results by repository
-            filtered_results = []
-            for result in repo_results:
-                result_repo = result.metadata.get('repository', '')
-                # Check if the repository name is contained in the result repository
-                repo_name = repository.split('/')[-1] if '/' in repository else repository
-                if repo_name.lower() in result_repo.lower():
-                    filtered_results.append(result)
-            
-            # Filter by diagram intent if available
-            if intent.get('preferred_type'):
-                intent_filtered = self._filter_by_diagram_intent(filtered_results, intent)
-                results.extend(intent_filtered)
-            else:
-                results.extend(filtered_results)
-                
+            # Process results outside of the search exception handling
+            if repo_results:
+                try:
+                    # Filter results by repository
+                    filtered_results = []
+                    for result in repo_results:
+                        result_repo = result.metadata.get('repository', '')
+                        # Check if the repository name is contained in the result repository
+                        repo_name = repository.split('/')[-1] if '/' in repository else repository
+                        if repo_name.lower() in result_repo.lower():
+                            filtered_results.append(result)
+                    
+                    # Filter by diagram intent if available
+                    if intent.get('preferred_type'):
+                        intent_filtered = self._filter_by_diagram_intent(filtered_results, intent)
+                        results.extend(intent_filtered)
+                    else:
+                        results.extend(filtered_results)
+                        
+                except Exception as e:
+                    logger.warning(f"Result processing failed for {repository}: {str(e)}")
+                    # Fallback: use original results if processing fails
+                    results.extend(repo_results)
+                    
         except Exception as e:
             logger.warning(f"Repository search failed for {repository}: {str(e)}")
         
