@@ -38,6 +38,16 @@ class DiagramAgent:
         self.response_enhancer = response_enhancer
         self.sequence_detector = SequenceDetector()
         
+        # Supported diagram types and their detection keywords (order matters - more specific first)
+        self.diagram_type_keywords = {
+            'architecture': ['architecture', 'architecture diagram', 'system architecture', 'system design', 'architectural', 'service architecture'],
+            'flowchart': ['flowchart', 'flow chart', 'process flow', 'workflow', 'decision tree', 'control flow'],
+            'sequence': ['sequence', 'interaction', 'method call', 'interaction diagram', 'sequence diagram'],
+            'class': ['class diagram', 'class structure', 'object model', 'inheritance', 'composition', 'uml class'],
+            'er': ['entity relationship', 'er diagram', 'database schema', 'data model', 'entity model'],
+            'component': ['component diagram', 'module diagram', 'service diagram']
+        }
+        
         # Initialize enhanced code analysis components
         self.pattern_detector = CodePatternDetector()
         self.diagram_query_optimizer = QueryOptimizer()
@@ -63,16 +73,6 @@ class DiagramAgent:
             'er': self._generate_er_diagram,
             'component': self._generate_component_diagram,
             'architecture': self._generate_architecture_diagram
-        }
-        
-        # Supported diagram types and their detection keywords (order matters - more specific first)
-        self.diagram_type_keywords = {
-            'architecture': ['architecture', 'architecture diagram', 'system architecture', 'system design', 'architectural', 'service architecture'],
-            'flowchart': ['flowchart', 'flow chart', 'process flow', 'workflow', 'decision tree', 'control flow'],
-            'sequence': ['sequence', 'interaction', 'method call', 'interaction diagram', 'sequence diagram'],
-            'class': ['class diagram', 'class structure', 'object model', 'inheritance', 'composition', 'uml class'],
-            'er': ['entity relationship', 'er diagram', 'database schema', 'data model', 'entity model'],
-            'component': ['component diagram', 'module diagram', 'service diagram']
         }
     
     def can_handle_request(self, query: str) -> bool:

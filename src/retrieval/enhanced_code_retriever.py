@@ -55,20 +55,40 @@ class EnhancedCodeRetriever:
             intent = self.diagram_query_optimizer.extract_diagram_intent(query)
             search_terms = self._extract_semantic_search_terms(query, intent)
             
-            # If specific repository is mentioned, prioritize it heavily
+            logger.info(f"Enhanced code retrieval - Query: '{query}'")
+            logger.info(f"Search terms: {search_terms}")
+            logger.info(f"Extracted repositories: {repositories}")
+            
+            # Check if extracted repositories are too generic to be useful
+            if repositories and self._are_repositories_too_generic(repositories, query):
+                logger.info("Extracted repositories are too generic, using multi-strategy search without repository filtering")
+                repositories = []  # Clear generic repositories
+            
+            # If specific repository is mentioned and not generic, prioritize it heavily
             if repositories:
                 logger.info(f"Repository-specific query detected: {repositories}")
                 # Use strict repository filtering
                 all_results = self._strict_repository_search(search_terms, repositories, intent)
+                
+                # If strict search fails, try lenient search
+                if not all_results:
+                    logger.info("Strict repository search failed, trying lenient search...")
+                    all_results = self._lenient_repository_search(search_terms, repositories, intent)
+                
+                # If still no results, fall back to multi-strategy search without repository filtering
+                if not all_results:
+                    logger.info("All repository search strategies failed. Falling back to multi-strategy search without repository filtering")
+                    all_results = self._multi_strategy_search(search_terms, [], intent)
             else:
                 # Fall back to multi-strategy search
-                all_results = self._multi_strategy_search(search_terms, repositories, intent)
+                logger.info("No specific repositories found, using multi-strategy search")
+                all_results = self._multi_strategy_search(search_terms, [], intent)
             
             if not all_results:
                 logger.warning("No results found in enhanced code retrieval")
                 return []
             
-            # Enhanced result processing with strict repository filtering
+            # Enhanced result processing with repository filtering only if repositories are specific
             processed_results = self._enhanced_result_processing(all_results, query, intent)
             
             logger.info(f"Enhanced retrieval: {len(processed_results)} relevant documents found")
@@ -362,9 +382,9 @@ class EnhancedCodeRetriever:
         # Filter by code quality and relevance
         filtered_results = self._filter_code_documents(unique_results)
         
-        # Apply repository filtering if specified
+        # Apply repository filtering only if specific, non-generic repositories are found
         repositories = self.repository_filter.extract_repositories(query)
-        if repositories:
+        if repositories and not self._are_repositories_too_generic(repositories, query):
             logger.info(f"Applying repository filtering for: {repositories}")
             filtered_results = self.repository_filter.filter_by_repository(filtered_results, repositories)
             logger.info(f"After repository filtering: {len(filtered_results)} documents")
@@ -374,6 +394,11 @@ class EnhancedCodeRetriever:
                 logger.warning("No results after strict repository filtering, trying lenient filtering")
                 # Try to find documents that might be from the same service family
                 filtered_results = self._lenient_repository_filtering(unique_results, repositories)
+        else:
+            if repositories:
+                logger.info(f"Skipping repository filtering for generic repositories: {repositories}")
+            else:
+                logger.info("No repositories specified, skipping repository filtering")
         
         # Apply file type filtering based on diagram intent
         if intent.get('preferred_type'):
@@ -575,3 +600,81 @@ class EnhancedCodeRetriever:
                 filtered.append(doc)
         
         return filtered
+
+    def _lenient_repository_search(self, search_terms: List[str], repositories: List[str], intent: Dict[str, Any]) -> List[Document]:
+        """
+        Perform a more lenient repository search when strict search fails
+        
+        Args:
+            search_terms: List of search terms
+            repositories: List of repository names to search
+            intent: Diagram generation intent
+            
+        Returns:
+            List of search results
+        """
+        results = []
+        
+        logger.info(f"Performing lenient repository search for repositories: {repositories}")
+        
+        for repo in repositories:
+            try:
+                # Try to search with just the repository name as a search term
+                repo_name = repo.split('/')[-1] if '/' in repo else repo
+                logger.info(f"Trying lenient search for repository: {repo_name}")
+                
+                # Search with repository name as part of the query
+                lenient_query = f"{repo_name} service architecture"
+                lenient_results = self.vectorstore.similarity_search(lenient_query, k=30)
+                
+                # Filter by repository (more lenient)
+                for result in lenient_results:
+                    result_repo = result.metadata.get('repository', '')
+                    if repo_name.lower() in result_repo.lower():
+                        results.append(result)
+                
+                if results:
+                    logger.info(f"Lenient search found {len(results)} results for {repo_name}")
+                    break
+                    
+            except Exception as e:
+                logger.warning(f"Lenient search failed for {repo}: {str(e)}")
+        
+        return results
+
+    def _are_repositories_too_generic(self, repositories: List[str], query: str) -> bool:
+        """
+        Check if extracted repositories are too generic to be useful for filtering
+        
+        Args:
+            repositories: List of extracted repository names
+            query: Original user query
+            
+        Returns:
+            True if repositories are too generic, False otherwise
+        """
+        # Common generic terms that shouldn't be treated as repository names
+        generic_terms = {
+            'generate', 'interaction', 'sequence', 'method', 'call', 'diagram', 
+            'simple', 'create', 'show', 'me', 'code', 'flowchart', 'architecture',
+            'system', 'design', 'service', 'component', 'class', 'entity', 'relationship',
+            'flow', 'process', 'steps', 'walk', 'through', 'explain', 'map', 'out',
+            'display', 'draw', 'visualize', 'chart', 'visualization'
+        }
+        
+        query_lower = query.lower()
+        
+        for repo in repositories:
+            repo_lower = repo.lower()
+            
+            # Check if repository name is just a generic term from the query
+            if repo_lower in generic_terms and repo_lower in query_lower:
+                logger.info(f"Repository '{repo}' appears to be a generic term, not a real repository")
+                return True
+            
+            # Check if repository name is too short or common
+            if len(repo) < 3 or repo_lower in ['the', 'and', 'or', 'for', 'with', 'from', 'to', 'in', 'on', 'at', 'by', 'of', 'a', 'an']:
+                logger.info(f"Repository '{repo}' is too short or common, likely not a real repository")
+                return True
+        
+        return False
