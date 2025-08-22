@@ -13,7 +13,16 @@ class TestApplicationStartupLogic:
     def test_main_function_structure(self):
         """Test that main.py has the expected function structure"""
         # Test the file exists and can be read
-        with open("/home/runner/work/knowledge-base-agent/knowledge-base-agent/main.py", "r") as f:
+from pathlib import Path
+
+class TestApplicationStartupLogic:
+    """Test suite for application startup logic validation"""
+    
+    def test_main_function_structure(self):
+        """Test that main.py has the expected function structure"""
+        # Test the file exists and can be read
+        main_py_path = Path(__file__).parent.parent / "main.py"
+        with open(main_py_path, "r") as f:
             content = f.read()
         
         # Check for key functions and imports
