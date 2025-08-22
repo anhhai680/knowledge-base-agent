@@ -47,7 +47,7 @@ class CSharpChunker(BaseChunker):
     Falls back to regex-based parsing if tree-sitter parsing fails.
     """
     
-    def __init__(self, max_chunk_size: int = 2000, chunk_overlap: int = 50, use_advanced_parsing: Optional[bool] = None):
+    def __init__(self, max_chunk_size: int = 2000, chunk_overlap: int = 50, use_advanced_parsing: Optional[bool] = None, force_regex_fallback: bool = False):
         """
         Initialize C# chunker.
         
@@ -55,6 +55,7 @@ class CSharpChunker(BaseChunker):
             max_chunk_size: Maximum size for chunks in characters
             chunk_overlap: Number of characters to overlap between chunks
             use_advanced_parsing: Whether to use tree-sitter advanced parsing. If None, uses environment variable USE_ADVANCED_PARSING.
+            force_regex_fallback: Force use of regex-based parsing instead of tree-sitter
         """
         super().__init__(max_chunk_size, chunk_overlap)
         
@@ -64,6 +65,10 @@ class CSharpChunker(BaseChunker):
             self.use_advanced_parsing = settings.use_advanced_parsing
         else:
             self.use_advanced_parsing = use_advanced_parsing
+        
+        # Force regex fallback if requested
+        if force_regex_fallback:
+            self.use_advanced_parsing = False
         
         # Initialize advanced parser
         self.advanced_parser = None
@@ -98,6 +103,48 @@ class CSharpChunker(BaseChunker):
         """
         return ['.cs']
     
+    def _should_use_advanced_parsing(self, content: str) -> bool:
+        """
+        Determine if advanced parsing should be used for this content.
+        
+        Args:
+            content: C# source code content
+            
+        Returns:
+            True if advanced parsing should be attempted
+        """
+        if not self.use_advanced_parsing or not self.advanced_parser:
+            return False
+        
+        # Check for problematic patterns that might cause tree-sitter issues
+        problematic_patterns = [
+            # Very long lines (can cause tree-sitter position issues)
+            r'.{1000,}',  # Lines longer than 1000 characters
+            
+            # Complex generic patterns that might confuse tree-sitter
+            r'<[^>]*<[^>]*>',  # Nested generics
+            
+            # Unusual C# syntax patterns
+            r'@".*"',  # Verbatim strings
+            r'\$\".*\"',  # Interpolated strings
+            
+            # Very large files
+            len(content) > 1000000,  # Files larger than 1MB
+        ]
+        
+        # Check for problematic patterns
+        for pattern in problematic_patterns:
+            if isinstance(pattern, str):
+                import re
+                if re.search(pattern, content, re.MULTILINE | re.DOTALL):
+                    logger.info("Detected problematic C# pattern, using regex fallback")
+                    return False
+            elif pattern:  # Boolean pattern
+                logger.info("File too large for advanced parsing, using regex fallback")
+                return False
+        
+        return True
+    
     def chunk_document(self, document: Document) -> List[Document]:
         """
         Chunk C# document preserving semantic boundaries.
@@ -116,8 +163,8 @@ class CSharpChunker(BaseChunker):
                 logger.warning("Empty C# document content after cleaning")
                 return []
             
-            # Try advanced parsing first
-            if self.use_advanced_parsing and self.advanced_parser:
+            # Check if we should use advanced parsing
+            if self._should_use_advanced_parsing(cleaned_content):
                 try:
                     return self._chunk_with_advanced_parsing(document, cleaned_content)
                 except (FallbackError, AdvancedParserError) as e:
@@ -145,44 +192,66 @@ class CSharpChunker(BaseChunker):
         Returns:
             List of chunked documents
         """
-        # Parse with tree-sitter
-        file_path = document.metadata.get('file_path', 'unknown.cs')
-        parse_result = self.advanced_parser.parse(content, file_path)
-        
-        if not parse_result.success:
-            raise FallbackError(f"Advanced parsing failed: {'; '.join(parse_result.errors)}")
-        
-        if not parse_result.elements:
-            logger.warning("No semantic elements extracted from C# code")
-            raise FallbackError("No semantic elements found")
-        
-        # Convert semantic elements to chunks
-        chunked_documents = []
-        element_groups = self._group_semantic_elements(parse_result.elements)
-        
-        for i, group in enumerate(element_groups):
-            chunk_content = self._create_chunk_from_semantic_elements(group, content)
+        try:
+            # Parse with tree-sitter
+            file_path = document.metadata.get('file_path', 'unknown.cs')
+            parse_result = self.advanced_parser.parse(content, file_path)
             
-            if not chunk_content.strip():
-                continue
+            if not parse_result.success:
+                logger.warning(f"Advanced parsing failed: {'; '.join(parse_result.errors)}")
+                raise FallbackError(f"Advanced parsing failed: {'; '.join(parse_result.errors)}")
             
-            # Check if chunk is too large and split if necessary
-            if len(chunk_content) > self.max_chunk_size:
-                sub_chunks = self._split_oversized_chunk(chunk_content, group[0] if group else None)
-                for j, sub_chunk in enumerate(sub_chunks):
-                    if sub_chunk.strip():
-                        sub_doc = self._create_semantic_chunk_document(
-                            sub_chunk, document, group, f"{i}.{j}", len(element_groups)
-                        )
-                        chunked_documents.append(sub_doc)
-            else:
-                chunk_doc = self._create_semantic_chunk_document(
-                    chunk_content, document, group, str(i), len(element_groups)
-                )
-                chunked_documents.append(chunk_doc)
-        
-        logger.debug(f"Created {len(chunked_documents)} chunks from C# document using tree-sitter")
-        return chunked_documents
+            if not parse_result.elements:
+                logger.warning("No semantic elements extracted from C# code")
+                raise FallbackError("No semantic elements found")
+            
+            # Validate that we have usable elements (with valid content)
+            valid_elements = [e for e in parse_result.elements if e.content and e.content.strip()]
+            if not valid_elements:
+                logger.warning("No valid semantic elements with content found, falling back to regex")
+                raise FallbackError("No valid semantic elements with content")
+            
+            # Convert semantic elements to chunks
+            chunked_documents = []
+            element_groups = self._group_semantic_elements(valid_elements)
+            
+            for i, group in enumerate(element_groups):
+                if not group:  # Skip empty groups
+                    continue
+                    
+                chunk_content = self._create_chunk_from_semantic_elements(group, content)
+                
+                if not chunk_content.strip():
+                    continue
+                
+                # Check if chunk is too large and split if necessary
+                if len(chunk_content) > self.max_chunk_size:
+                    sub_chunks = self._split_oversized_chunk(chunk_content, group[0] if group else None)
+                    for j, sub_chunk in enumerate(sub_chunks):
+                        if sub_chunk.strip():
+                            sub_doc = self._create_semantic_chunk_document(
+                                sub_chunk, document, group, f"{i}.{j}", len(element_groups)
+                            )
+                            chunked_documents.append(sub_doc)
+                else:
+                    chunk_doc = self._create_semantic_chunk_document(
+                        chunk_content, document, group, str(i), len(element_groups)
+                    )
+                    chunked_documents.append(chunk_doc)
+            
+            if not chunked_documents:
+                logger.warning("No valid chunks created from semantic elements, falling back to regex")
+                raise FallbackError("No valid chunks created")
+            
+            logger.debug(f"Created {len(chunked_documents)} chunks from C# document using tree-sitter")
+            return chunked_documents
+            
+        except (FallbackError, AdvancedParserError) as e:
+            # Re-raise these specific errors
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in advanced parsing: {e}")
+            raise FallbackError(f"Advanced parsing failed with unexpected error: {e}")
     
     def _chunk_with_regex_parsing(self, document: Document, content: str) -> List[Document]:
         """
@@ -474,100 +543,158 @@ class CSharpChunker(BaseChunker):
         elements = []
         lines = code.split('\n')
         
-        # Find using statements
-        using_lines = []
-        for i, line in enumerate(lines, 1):
-            if self.using_pattern.match(line):
-                using_lines.append(i)
-        
-        if using_lines:
-            elements.append(CSharpElement(
-                name="__usings__",
-                element_type="using",
-                start_line=using_lines[0],
-                end_line=using_lines[-1],
-                content='\n'.join(lines[using_lines[0]-1:using_lines[-1]])
-            ))
-        
-        # Find namespaces
-        for match in self.namespace_pattern.finditer(code):
-            namespace_name = match.group(1)
-            start_line = code[:match.start()].count('\n') + 1
+        try:
+            # Find using statements
+            using_lines = []
+            for i, line in enumerate(lines, 1):
+                if self.using_pattern.match(line):
+                    using_lines.append(i)
             
-            # Find the end of namespace (simplified - assumes single namespace per file)
-            elements.append(CSharpElement(
-                name=namespace_name,
-                element_type="namespace",
-                start_line=start_line,
-                end_line=start_line,  # Will be updated when we process content
-                content=lines[start_line-1] if start_line <= len(lines) else ""
-            ))
-        
-        # Find classes, interfaces, structs, enums
-        for match in self.class_pattern.finditer(code):
-            access_modifier = match.group(1) or "internal"
-            class_type = match.group(3)
-            class_name = match.group(4)
-            start_line = code[:match.start()].count('\n') + 1
+            if using_lines:
+                using_content = '\n'.join(lines[using_lines[0]-1:using_lines[-1]])
+                elements.append(CSharpElement(
+                    name="__usings__",
+                    element_type="using",
+                    start_line=using_lines[0],
+                    end_line=using_lines[-1],
+                    content=using_content
+                ))
             
-            # Find class body using regex for balanced braces
-            class_body_pattern = re.compile(r'\{(?:[^{}]*|(?R))*\}')
-            class_body_match = class_body_pattern.search(code, match.end())
-            
-            if class_body_match:
-                class_end = class_body_match.end()
-                class_content = code[match.start():class_end]
-                end_line = code[:class_end].count('\n') + 1
-            else:
-                logger.warning(f"Could not find class body for {class_name}")
-                class_end = match.end()
-                class_content = code[match.start():class_end]
-                end_line = code[:class_end].count('\n') + 1
-            
-            elements.append(CSharpElement(
-                name=class_name,
-                element_type=class_type,
-                start_line=start_line,
-                end_line=end_line,
-                content=class_content,
-                access_modifier=access_modifier
-            ))
-        
-        # Find methods within classes (simplified)
-        for match in self.method_pattern.finditer(code):
-            access_modifier = match.group(1) or "private"
-            return_type = match.group(3)
-            method_name = match.group(4)
-            start_line = code[:match.start()].count('\n') + 1
-            
-            # Simplified method end detection
-            method_start = match.end()
-            if code[method_start-1:method_start] == '{':
-                brace_count = 1
-                method_end = method_start
+            # Find namespaces with improved pattern matching
+            namespace_matches = list(self.namespace_pattern.finditer(code))
+            for match in namespace_matches:
+                namespace_name = match.group(1)
+                start_line = code[:match.start()].count('\n') + 1
                 
-                for i, char in enumerate(code[method_start:], method_start):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            method_end = i + 1
-                            break
+                # Find the end of namespace using balanced brace counting
+                namespace_start = match.start()
+                brace_count = 0
+                in_string = False
+                in_comment = False
+                namespace_end = len(code)
                 
-                end_line = code[:method_end].count('\n') + 1
-                method_content = code[match.start():method_end]
+                for i, char in enumerate(code[namespace_start:], namespace_start):
+                    if char == '"' and (i == 0 or code[i-1] != '\\'):
+                        in_string = not in_string
+                    elif char == '/' and i + 1 < len(code) and code[i+1] == '/' and not in_string:
+                        in_comment = True
+                    elif char == '\n' and in_comment:
+                        in_comment = False
+                    elif not in_string and not in_comment:
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                namespace_end = i + 1
+                                break
+                
+                end_line = code[:namespace_end].count('\n') + 1
+                namespace_content = code[namespace_start:namespace_end]
                 
                 elements.append(CSharpElement(
-                    name=method_name,
-                    element_type="method",
+                    name=namespace_name,
+                    element_type="namespace",
                     start_line=start_line,
                     end_line=end_line,
-                    content=method_content,
+                    content=namespace_content
+                ))
+            
+            # Find classes, interfaces, structs, enums with improved pattern matching
+            class_matches = list(self.class_pattern.finditer(code))
+            for match in class_matches:
+                access_modifier = match.group(1) or "internal"
+                class_type = match.group(3)
+                class_name = match.group(4)
+                start_line = code[:match.start()].count('\n') + 1
+                
+                # Find class body using balanced brace counting
+                class_start = match.start()
+                brace_count = 0
+                in_string = False
+                in_comment = False
+                class_end = len(code)
+                
+                for i, char in enumerate(code[class_start:], class_start):
+                    if char == '"' and (i == 0 or code[i-1] != '\\'):
+                        in_string = not in_string
+                    elif char == '/' and i + 1 < len(code) and code[i+1] == '/' and not in_string:
+                        in_comment = True
+                    elif char == '\n' and in_comment:
+                        in_comment = False
+                    elif not in_string and not in_comment:
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                class_end = i + 1
+                                break
+                
+                end_line = code[:class_end].count('\n') + 1
+                class_content = code[class_start:class_end]
+                
+                elements.append(CSharpElement(
+                    name=class_name,
+                    element_type=class_type,
+                    start_line=start_line,
+                    end_line=end_line,
+                    content=class_content,
                     access_modifier=access_modifier
                 ))
+            
+            # Find methods within classes (improved pattern)
+            method_matches = list(self.method_pattern.finditer(code))
+            for match in method_matches:
+                access_modifier = match.group(1) or "private"
+                return_type = match.group(3)
+                method_name = match.group(4)
+                start_line = code[:match.start()].count('\n') + 1
+                
+                # Find method body using balanced brace counting
+                method_start = match.end()
+                if code[method_start-1:method_start] == '{':
+                    brace_count = 1
+                    method_end = method_start
+                    
+                    for i, char in enumerate(code[method_start:], method_start):
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                method_end = i + 1
+                                break
+                    
+                    end_line = code[:method_end].count('\n') + 1
+                    method_content = code[match.start():method_end]
+                    
+                    elements.append(CSharpElement(
+                        name=method_name,
+                        element_type="method",
+                        start_line=start_line,
+                        end_line=end_line,
+                        content=method_content,
+                        access_modifier=access_modifier
+                    ))
+            
+            # Sort elements by line number
+            elements = sorted(elements, key=lambda x: x.start_line)
+            
+        except Exception as e:
+            logger.warning(f"Error during regex-based C# parsing: {e}")
+            # Return minimal elements to avoid complete failure
+            if not elements:
+                # Create a single element for the entire file
+                elements.append(CSharpElement(
+                    name="__file__",
+                    element_type="content",
+                    start_line=1,
+                    end_line=len(lines),
+                    content=code
+                ))
         
-        return sorted(elements, key=lambda x: x.start_line)
+        return elements
     
     def _group_csharp_elements(self, elements: List[CSharpElement]) -> List[List[CSharpElement]]:
         """
@@ -784,8 +911,120 @@ class CSharpChunker(BaseChunker):
         Returns:
             List of simply chunked documents
         """
+        try:
+            # Try to create meaningful chunks based on C# structure even in fallback mode
+            chunks = []
+            lines = content.split('\n')
+            current_chunk = []
+            current_size = 0
+            
+            for line in lines:
+                line_size = len(line) + 1  # +1 for newline
+                
+                # Start new chunk for certain C# patterns
+                should_start_new_chunk = (
+                    # Class/interface/struct declarations
+                    re.match(r'^\s*(public|private|protected|internal)?\s*(abstract|sealed|static)?\s*(class|interface|struct|enum)\s+', line) or
+                    # Namespace declarations
+                    re.match(r'^\s*namespace\s+', line) or
+                    # Method declarations
+                    re.match(r'^\s*(public|private|protected|internal)?\s*(static|virtual|override|abstract)?\s*\w+\s+\w+\s*\(', line) or
+                    # Property declarations
+                    re.match(r'^\s*(public|private|protected|internal)?\s*\w+\s+\w+\s*{\s*(get|set)', line) or
+                    # Using statements
+                    re.match(r'^\s*using\s+', line) or
+                    # Current chunk is getting too large
+                    current_size + line_size > self.max_chunk_size
+                )
+                
+                if should_start_new_chunk and current_chunk:
+                    # Save current chunk
+                    chunk_content = '\n'.join(current_chunk)
+                    if chunk_content.strip():
+                        chunk_doc = self._create_fallback_chunk_document(
+                            chunk_content, document, len(chunks)
+                        )
+                        chunks.append(chunk_doc)
+                    
+                    # Start new chunk
+                    current_chunk = [line]
+                    current_size = line_size
+                else:
+                    current_chunk.append(line)
+                    current_size += line_size
+            
+            # Add the last chunk
+            if current_chunk:
+                chunk_content = '\n'.join(current_chunk)
+                if chunk_content.strip():
+                    chunk_doc = self._create_fallback_chunk_document(
+                        chunk_content, document, len(chunks)
+                    )
+                    chunks.append(chunk_doc)
+            
+            if chunks:
+                logger.info(f"Created {len(chunks)} fallback chunks for C# document")
+                return chunks
+            
+        except Exception as e:
+            logger.warning(f"Error in C# fallback chunking: {e}")
+        
+        # Ultimate fallback - use the generic fallback chunker
         from .fallback_chunker import FallbackChunker
         
         fallback_chunker = FallbackChunker(self.max_chunk_size, self.chunk_overlap)
         temp_doc = Document(page_content=content, metadata=document.metadata)
         return fallback_chunker.chunk_document(temp_doc)
+    
+    def _create_fallback_chunk_document(self, content: str, original_doc: Document, chunk_index: int) -> Document:
+        """
+        Create a fallback chunk document with basic C# metadata.
+        
+        Args:
+            content: Chunk content
+            original_doc: Original document
+            chunk_index: Index of this chunk
+            
+        Returns:
+            Document with basic metadata
+        """
+        # Try to extract basic C# information from the chunk
+        chunk_type = "content"
+        symbol_name = None
+        
+        # Look for class/interface/struct declarations
+        class_match = re.search(r'(?:class|interface|struct|enum)\s+(\w+)', content)
+        if class_match:
+            chunk_type = "type_declaration"
+            symbol_name = class_match.group(1)
+        
+        # Look for method declarations
+        method_match = re.search(r'(\w+)\s*\([^)]*\)\s*{?', content)
+        if method_match and not symbol_name:
+            chunk_type = "method"
+            symbol_name = method_match.group(1)
+        
+        # Look for namespace declarations
+        namespace_match = re.search(r'namespace\s+([^\s{]+)', content)
+        if namespace_match and not symbol_name:
+            chunk_type = "namespace"
+            symbol_name = namespace_match.group(1)
+        
+        chunk_metadata = ChunkMetadata(
+            source=original_doc.metadata.get('source', 'unknown'),
+            file_path=original_doc.metadata.get('file_path', 'unknown'),
+            file_type=".cs",
+            chunk_type=chunk_type,
+            symbol_name=symbol_name,
+            language="csharp",
+            contains_documentation=self._contains_xml_docs(content),
+            parsing_method="fallback"
+        )
+        
+        return self._create_chunk_document(
+            content=content,
+            original_metadata=original_doc.metadata,
+            chunk_metadata=chunk_metadata,
+            chunk_index=chunk_index,
+            total_chunks=1  # We don't know the total in fallback mode
+        )

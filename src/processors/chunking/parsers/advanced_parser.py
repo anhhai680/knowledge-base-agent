@@ -296,7 +296,7 @@ class AdvancedParser(ABC):
             logger.error(f"Error during semantic extraction: {e}")
             return []
     
-    def _validate_elements(self, elements: List[SemanticElement], source_code: str) -> None:
+    def _validate_elements(self, elements: List[SemanticElement], source_code: str):
         """
         Validate extracted semantic elements.
         
@@ -314,21 +314,44 @@ class AdvancedParser(ABC):
             try:
                 # Validate position bounds
                 if element.position.start_byte < 0 or element.position.end_byte > source_length:
-                    logger.warning(f"Element '{element.name}' has invalid byte position")
+                    logger.warning(f"Element '{element.name}' has invalid byte position: {element.position.start_byte}-{element.position.end_byte}, source length: {source_length}")
+                    # Try to fix the position if possible
+                    if element.position.start_byte < 0:
+                        element.position.start_byte = 0
+                    if element.position.end_byte > source_length:
+                        element.position.end_byte = source_length
+                    if element.position.start_byte >= element.position.end_byte:
+                        logger.warning(f"Element '{element.name}' has invalid byte range after fix, skipping content extraction")
+                        element.content = ""
+                        continue
                 
                 if element.position.start_line < 1 or element.position.end_line > len(source_lines):
-                    logger.warning(f"Element '{element.name}' has invalid line position")
+                    logger.warning(f"Element '{element.name}' has invalid line position: {element.position.start_line}-{element.position.end_line}, total lines: {len(source_lines)}")
+                    # Try to fix line positions
+                    if element.position.start_line < 1:
+                        element.position.start_line = 1
+                    if element.position.end_line > len(source_lines):
+                        element.position.end_line = len(source_lines)
+                    if element.position.start_line > element.position.end_line:
+                        logger.warning(f"Element '{element.name}' has invalid line range after fix, skipping content extraction")
+                        element.content = ""
+                        continue
                 
-                # Validate content consistency
-                if element.content:
+                # Validate content consistency only if we have valid positions
+                if element.content and element.position.start_byte < element.position.end_byte:
                     try:
                         extracted_content = source_code[element.position.start_byte:element.position.end_byte]
                         if element.content.strip() != extracted_content.strip():
-                            logger.debug(f"Element '{element.name}' content may not match position")
+                            logger.debug(f"Element '{element.name}' content may not match position, updating content")
+                            element.content = extracted_content
                     except IndexError:
-                        logger.warning(f"Element '{element.name}' position out of bounds")
+                        logger.warning(f"Element '{element.name}' position out of bounds during content validation")
+                        element.content = ""
+                        
             except Exception as e:
                 logger.warning(f"Error validating element {element.name}: {e}")
+                # Mark element as invalid but don't remove it
+                element.content = ""
                 continue
     
     def _create_position(self, node: ts.Node) -> SemanticPosition:
@@ -342,16 +365,32 @@ class AdvancedParser(ABC):
             SemanticPosition object
         """
         try:
+            # Validate node positions before creating SemanticPosition
+            start_line = max(0, node.start_point[0]) + 1  # Convert to 1-based, ensure non-negative
+            end_line = max(0, node.end_point[0]) + 1
+            start_column = max(0, node.start_point[1])
+            end_column = max(0, node.end_point[1])
+            start_byte = max(0, node.start_byte)
+            end_byte = max(0, node.end_byte)
+            
+            # Ensure logical consistency
+            if start_line > end_line:
+                start_line, end_line = end_line, start_line
+            if start_line == end_line and start_column > end_column:
+                start_column, end_column = end_column, start_column
+            if start_byte > end_byte:
+                start_byte, end_byte = end_byte, start_byte
+            
             return SemanticPosition(
-                start_line=node.start_point[0] + 1,  # Convert to 1-based
-                end_line=node.end_point[0] + 1,
-                start_column=node.start_point[1],
-                end_column=node.end_point[1],
-                start_byte=node.start_byte,
-                end_byte=node.end_byte
+                start_line=start_line,
+                end_line=end_line,
+                start_column=start_column,
+                end_column=end_column,
+                start_byte=start_byte,
+                end_byte=end_byte
             )
         except Exception as e:
-            logger.warning(f"Error creating position from node: {e}")
+            logger.warning(f"Error creating position from node: {e}, node type: {getattr(node, 'type', 'unknown')}")
             # Return safe default position
             return SemanticPosition(
                 start_line=1, end_line=1,
@@ -371,9 +410,25 @@ class AdvancedParser(ABC):
             Text content of the node
         """
         try:
-            return source_code[node.start_byte:node.end_byte]
-        except IndexError:
-            logger.warning(f"Node position out of bounds: {node.start_byte}-{node.end_byte}")
+            # Validate byte positions before extraction
+            if (node.start_byte < 0 or node.end_byte < 0 or 
+                node.start_byte >= len(source_code) or node.end_byte > len(source_code)):
+                logger.warning(f"Node has invalid byte positions: {node.start_byte}-{node.end_byte}, source length: {len(source_code)}")
+                return ""
+            
+            # Ensure start_byte <= end_byte
+            if node.start_byte > node.end_byte:
+                logger.warning(f"Node has invalid byte range: start_byte ({node.start_byte}) > end_byte ({node.end_byte})")
+                return ""
+            
+            extracted_text = source_code[node.start_byte:node.end_byte]
+            return extracted_text
+            
+        except IndexError as e:
+            logger.warning(f"Index error extracting node text: {e}, node: {node.start_byte}-{node.end_byte}, source length: {len(source_code)}")
+            return ""
+        except Exception as e:
+            logger.warning(f"Unexpected error extracting node text: {e}")
             return ""
     
     def _find_child_by_type(self, node: ts.Node, node_type: str) -> Optional[ts.Node]:

@@ -91,11 +91,50 @@ class ChunkingFactory:
         chunker = self._chunkers.get(extension)
         
         if chunker:
+            # Special handling for C# files that might be problematic
+            if extension == '.cs' and hasattr(chunker, 'force_regex_fallback'):
+                # Check if this is a known problematic file
+                if self._is_problematic_csharp_file(file_path):
+                    logger.info(f"Detected problematic C# file {file_path}, forcing regex fallback")
+                    # Create a new chunker instance with regex fallback
+                    from .csharp_chunker import CSharpChunker
+                    chunker = CSharpChunker(
+                        max_chunk_size=self._default_config['max_chunk_size'],
+                        chunk_overlap=self._default_config['chunk_overlap'],
+                        force_regex_fallback=True
+                    )
+            
             logger.debug(f"Using {chunker.__class__.__name__} for file {file_path}")
             return chunker
         else:
             logger.debug(f"Using fallback chunker for file {file_path} (extension: {extension})")
             return self._fallback_chunker
+    
+    def _is_problematic_csharp_file(self, file_path: str) -> bool:
+        """
+        Check if a C# file is known to cause parsing issues.
+        
+        Args:
+            file_path: Path to the C# file
+            
+        Returns:
+            True if the file is known to be problematic
+        """
+        # Check for known problematic patterns in the filename
+        problematic_patterns = [
+            'ViewModel',  # Complex MVVM patterns
+            'Service',    # Service classes often have complex dependencies
+            'Controller', # MVC controllers
+            'Repository', # Data access patterns
+            'Factory',    # Factory patterns
+            'Builder',    # Builder patterns
+            'Extensions', # Extension methods
+            'Mock',       # Mock/test files
+            'Test',       # Test files
+        ]
+        
+        filename = file_path.lower()
+        return any(pattern.lower() in filename for pattern in problematic_patterns)
     
     def chunk_documents(self, documents: List[Document]) -> List[Document]:
         """
