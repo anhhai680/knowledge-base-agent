@@ -25,6 +25,27 @@
   - **Next**: Resume optimization work after diagram enhancement completion
 
 ## Pending
+
+### Agents Refactoring Implementation Plan (Phase 1: Foundation Cleanup)
+- [TASK036] Remove Diagram Backward Compatibility - Remove legacy diagram handler and simplify agent router
+- [TASK037] Create Base Classes and Common Patterns - Establish foundation abstractions and RAG-specific base classes  
+- [TASK038] Unified Configuration System - Consolidate configuration management with hierarchical structure
+
+### Agents Refactoring Implementation Plan (Phase 2: Core Architecture Refactoring)
+- [TASK039] Agents Module Refactoring - Break down large agent files and implement unified interfaces
+- [TASK040] Processors Module Refactoring - Modernize text processing with pipeline architecture
+- [TASK041] API Layer Simplification - Implement service layer and reduce routes.py complexity
+
+### Agents Refactoring Implementation Plan (Phase 3: Integration and Optimization)
+- [TASK042] RAG Performance Optimization - Implement caching, monitoring, and advanced processing strategies
+- [TASK043] Plugin Architecture Implementation - Create extensible plugin system for future enhancements
+- [TASK044] Performance Optimization Implementation - System-wide caching and async processing
+
+### Agents Refactoring Implementation Plan (Phase 4: Testing and Documentation)
+- [TASK045] Comprehensive Testing Strategy - Unit, integration, performance, regression, and quality testing
+- [TASK046] Documentation and Migration Guides - Complete documentation and migration assistance
+
+### Future Enhancements
 - [TASK033] Implement Comprehensive Unit Testing - Complete test coverage for enhanced diagram capabilities (Future)
 - [TASK034] Implement Integration Testing - End-to-end validation of multi-diagram system (Future)  
 - [TASK035] Implement Performance Testing - Benchmark enhanced diagram generation performance (Future)
