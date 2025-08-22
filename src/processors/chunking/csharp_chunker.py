@@ -7,11 +7,11 @@ Falls back to regex-based parsing if tree-sitter fails.
 """
 
 import re
-from typing import List, Optional, NamedTuple, Dict, Any
+from typing import List, Optional, NamedTuple
 from langchain.docstore.document import Document
 from .base_chunker import BaseChunker, ChunkMetadata
 from .parsers.csharp_parser import CSharpAdvancedParser
-from .parsers.semantic_element import SemanticElement, ElementType, ParseResult
+from .parsers.semantic_element import SemanticElement, ElementType
 from .parsers.advanced_parser import FallbackError, AdvancedParserError
 from ...utils.logging import get_logger
 from ...config.settings import settings
