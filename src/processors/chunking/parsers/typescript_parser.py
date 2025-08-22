@@ -6,7 +6,7 @@ supporting all TypeScript features including types, interfaces, generics,
 decorators, namespaces, and modern ES6+ features.
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 import tree_sitter as ts
 import tree_sitter_typescript as ts_typescript
 
@@ -14,9 +14,7 @@ from .javascript_parser import JavaScriptAdvancedParser
 from .semantic_element import (
     SemanticElement, 
     ElementType, 
-    SemanticPosition,
-    AccessModifier,
-    ParseResult
+    AccessModifier
 )
 from ....utils.logging import get_logger
 

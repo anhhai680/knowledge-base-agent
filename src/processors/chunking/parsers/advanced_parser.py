@@ -7,20 +7,15 @@ language-specific parsers.
 """
 
 import time
-import signal
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Union, Callable
+from typing import Dict, List, Optional, Any
 import tree_sitter as ts
-from pathlib import Path
 import threading
-import sys
 
 from .semantic_element import (
     SemanticElement, 
-    ElementType, 
     SemanticPosition, 
-    ParseResult,
-    AccessModifier
+    ParseResult
 )
 from ....utils.logging import get_logger
 

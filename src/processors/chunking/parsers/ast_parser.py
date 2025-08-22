@@ -4,7 +4,7 @@ AST-based parser for extracting semantic chunks from source code.
 
 import ast
 import re
-from typing import List, Dict, Any, Optional, Tuple, NamedTuple
+from typing import List, Dict, Optional, NamedTuple
 
 from ....utils.logging import get_logger
 

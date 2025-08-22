@@ -5,7 +5,7 @@ This module provides comprehensive data structures for representing semantic
 elements extracted from source code using tree-sitter parsers.
 """
 
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 

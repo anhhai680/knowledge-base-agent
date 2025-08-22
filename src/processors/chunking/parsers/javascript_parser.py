@@ -6,7 +6,7 @@ supporting modern ES6+ features including classes, modules, arrow functions,
 async/await, destructuring, and JSX.
 """
 
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 import tree_sitter as ts
 import tree_sitter_javascript as ts_javascript
 
@@ -14,9 +14,7 @@ from .advanced_parser import AdvancedParser
 from .semantic_element import (
     SemanticElement, 
     ElementType, 
-    SemanticPosition,
-    AccessModifier,
-    ParseResult
+    AccessModifier
 )
 from ....utils.logging import get_logger
 
