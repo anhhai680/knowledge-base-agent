@@ -300,6 +300,7 @@ Agent: [Analyzes code and generates comprehensive sequence diagram]
 - **Performance Optimization**: Enhanced chunking and processing strategies
 - **Configuration Management**: Flexible model switching and configuration
 - **Backward Compatibility**: 100% maintained throughout enhancements
+- **Enhanced Code Retrieval**: Core functionality implemented (70% complete, needs refinement)
 
 ### Advanced Agent Architecture ✅ NEWLY IMPLEMENTED
 - **Dual Diagram Agent Support**: **NEW** - Legacy DiagramHandler + Enhanced DiagramAgent
@@ -307,6 +308,7 @@ Agent: [Analyzes code and generates comprehensive sequence diagram]
 - **Enhanced Code Analysis**: **NEW** - Advanced pattern detection and extraction
 - **Repository-Specific Filtering**: **NEW** - Context-aware diagram generation
 - **Integration with RAG System**: **NEW** - Full integration with advanced reasoning capabilities
+- **Enhanced Code Retrieval**: **NEW** - Multi-strategy search with repository filtering (70% complete)
 
 ## Future Capabilities (Planned)
 
