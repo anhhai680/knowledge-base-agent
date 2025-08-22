@@ -641,6 +641,48 @@ async def health_check():
         else:
             components["llm"] = "not_initialized"
         
+        # Check DiagramAgent and agent router
+        if agent_router:
+            components["agent_router"] = "healthy"
+            
+            # Check if DiagramAgent is available and functional
+            if hasattr(agent_router, 'diagram_agent') and agent_router.diagram_agent:
+                try:
+                    # Basic DiagramAgent health check - verify it has required components
+                    da = agent_router.diagram_agent
+                    has_vectorstore = hasattr(da, 'vectorstore') and da.vectorstore is not None
+                    has_llm = hasattr(da, 'llm') and da.llm is not None
+                    has_sequence_detector = hasattr(da, 'sequence_detector') and da.sequence_detector is not None
+                    
+                    if has_vectorstore and has_llm and has_sequence_detector:
+                        components["diagram_agent"] = "healthy"
+                        
+                        # Check enhanced features
+                        enhanced_features = []
+                        if hasattr(da, 'query_optimizer') and da.query_optimizer:
+                            enhanced_features.append("query_optimizer")
+                        if hasattr(da, 'response_enhancer') and da.response_enhancer:
+                            enhanced_features.append("response_enhancer")
+                        
+                        if enhanced_features:
+                            components["diagram_agent_enhanced"] = f"enabled: {', '.join(enhanced_features)}"
+                        else:
+                            components["diagram_agent_enhanced"] = "basic_mode"
+                    else:
+                        missing = []
+                        if not has_vectorstore: missing.append("vectorstore")
+                        if not has_llm: missing.append("llm")
+                        if not has_sequence_detector: missing.append("sequence_detector")
+                        components["diagram_agent"] = f"unhealthy: missing {', '.join(missing)}"
+                        
+                except Exception as e:
+                    components["diagram_agent"] = f"error: {str(e)}"
+            else:
+                components["diagram_agent"] = "not_available"
+        else:
+            components["agent_router"] = "not_initialized"
+            components["diagram_agent"] = "not_initialized"
+        
         # Check other components
         components["github_loader"] = "healthy" if github_loader else "not_initialized"
         components["text_processor"] = "healthy" if text_processor else "not_initialized"
@@ -721,4 +763,55 @@ async def validate_config():
         }
     except Exception as e:
         logger.error(f"Error validating configuration: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/config/diagram-agent")
+async def get_diagram_agent_config():
+    """Get DiagramAgent configuration and status"""
+    try:
+        result = {
+            "diagram_agent_available": False,
+            "enhanced_features": {},
+            "configuration": {},
+            "status": "not_initialized"
+        }
+        
+        if agent_router and hasattr(agent_router, 'diagram_agent') and agent_router.diagram_agent:
+            da = agent_router.diagram_agent
+            result["diagram_agent_available"] = True
+            result["status"] = "available"
+            
+            # Check enhanced features
+            enhanced_features = {
+                "query_optimizer": {
+                    "available": hasattr(da, 'query_optimizer') and da.query_optimizer is not None,
+                    "type": type(da.query_optimizer).__name__ if hasattr(da, 'query_optimizer') and da.query_optimizer else None
+                },
+                "response_enhancer": {
+                    "available": hasattr(da, 'response_enhancer') and da.response_enhancer is not None,
+                    "type": type(da.response_enhancer).__name__ if hasattr(da, 'response_enhancer') and da.response_enhancer else None
+                }
+            }
+            result["enhanced_features"] = enhanced_features
+            
+            # Get supported diagram types
+            if hasattr(da, 'get_supported_diagram_types'):
+                try:
+                    result["supported_diagram_types"] = da.get_supported_diagram_types()
+                except Exception as e:
+                    result["supported_diagram_types"] = f"error: {str(e)}"
+            
+            # Configuration info
+            config_info = {
+                "vectorstore_connected": hasattr(da, 'vectorstore') and da.vectorstore is not None,
+                "llm_connected": hasattr(da, 'llm') and da.llm is not None,
+                "sequence_detector_available": hasattr(da, 'sequence_detector') and da.sequence_detector is not None
+            }
+            result["configuration"] = config_info
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error getting DiagramAgent configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
