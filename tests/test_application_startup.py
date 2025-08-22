@@ -39,7 +39,8 @@ class TestApplicationStartupLogic:
     
     def test_enhanced_startup_validation_structure(self):
         """Test that enhanced startup validation has proper structure"""
-        with open("/home/runner/work/knowledge-base-agent/knowledge-base-agent/main.py", "r") as f:
+        main_py_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "main.py")
+        with open(main_py_path, "r") as f:
             content = f.read()
         
         # Check for proper async structure
