@@ -187,7 +187,7 @@ def main():
         
         # Run the application with enhanced validation
         # Disable reload in containerized environments to prevent restart loops
-        use_reload = settings.app_env == "development" and not os.getenv("DOCKER_CONTAINER", False)
+        use_reload = settings.app_env == "development" and not bool(os.getenv("DOCKER_CONTAINER"))
         
         if use_reload:
             # Development mode - use standard uvicorn with reload
