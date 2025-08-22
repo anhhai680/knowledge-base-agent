@@ -26,6 +26,10 @@
 
 ## Pending
 
+### Critical Code Quality Issues
+- [TASK047] Simplify AgentRouter - Remove Diagram Logic Duplication - 85% Complete - AgentRouter reduced from 359 to 199 lines (45% reduction)
+- [TASK048] Break Down DiagramAgent - **35% COMPLETE** - Extracted EnhancedCodeRetriever (577 lines), reduced DiagramAgent from 1,160→752 lines
+
 ### Agents Refactoring Implementation Plan (Phase 1: Foundation Cleanup)
 - [TASK036] Remove Diagram Backward Compatibility - Remove legacy diagram handler and simplify agent router
 - [TASK037] Create Base Classes and Common Patterns - Establish foundation abstractions and RAG-specific base classes  
