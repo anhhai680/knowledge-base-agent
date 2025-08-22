@@ -118,13 +118,26 @@ class QueryOptimizer:
         """
         query_lower = query.lower()
         
-        # Add diagram-specific terms if not present
-        for diagram_type, keywords in self.diagram_keywords.items():
-            if any(keyword in query_lower for keyword in keywords):
-                # Query already contains diagram-specific terms
-                return query
+        # Check if query already contains very specific, strong diagram terms
+        # These are terms that clearly indicate a diagram request and don't need enhancement
+        strong_diagram_terms = ['diagram', 'flowchart', 'sequence diagram', 'class diagram', 'er diagram', 'component diagram', 'architecture diagram', 'uml diagram']
+        has_strong_diagram_terms = any(term in query_lower for term in strong_diagram_terms)
         
-        # Add general diagram terms if none detected
+        # If query already contains strong diagram terms, don't modify it
+        if has_strong_diagram_terms:
+            return query
+        
+        # Check for specific technical terms that suggest diagram intent
+        # Only these specific terms prevent enhancement
+        specific_intent_terms = ['api calls', 'sequence', 'interaction', 'class structure', 'entity relationship']
+        has_specific_intent = any(term in query_lower for term in specific_intent_terms)
+        
+        # If query has specific diagram intent, don't enhance it
+        if has_specific_intent:
+            return query
+        
+        # For all other queries, enhance them with diagram terms
+        # This allows queries like "show me the user flow" to get enhanced
         enhanced_query = query + " diagram visualization code structure"
         return enhanced_query
     
@@ -210,7 +223,7 @@ class RepositoryFilter:
         for repo in repositories:
             repo = repo.strip('.,;:')
             # Filter out common words that shouldn't be repositories
-            if repo and len(repo) > 1 and repo.lower() not in ['no', 'mentioned', 'the', 'a', 'an', 'of', 'in', 'at', 'by']:
+            if repo and len(repo) > 1 and repo.lower() not in ['no', 'mentioned', 'the', 'a', 'an', 'of', 'in', 'at', 'by', 'repo', 'create', 'flowchart']:
                 cleaned_repos.append(repo)
         
         return list(set(cleaned_repos))
@@ -237,14 +250,15 @@ class RepositoryFilter:
         # Look for repository-like patterns (words that could be repo names)
         for word in words:
             # Skip common words and very short terms
-            if len(word) < 3 or word in ['the', 'and', 'or', 'for', 'with', 'from', 'to', 'in', 'on', 'at', 'by', 'of', 'a', 'an']:
+            if len(word) < 3 or word in ['the', 'and', 'or', 'for', 'with', 'from', 'to', 'in', 'on', 'at', 'by', 'of', 'a', 'an', 'show', 'me', 'code', 'create', 'generate', 'diagram', 'flowchart', 'sequence']:
                 continue
             
             # Clean up the word (remove special characters)
             clean_word = re.sub(r'[^\w\-_]', '', word)
             if len(clean_word) >= 3:
                 # Check if this looks like a repository name
-                if '-' in clean_word or '_' in clean_word or clean_word.islower():
+                # Only consider words that have repository-like characteristics
+                if ('-' in clean_word or '_' in clean_word) and clean_word.islower():
                     logger.info(f"Found potential repository name: '{clean_word}'")
                     inferred_repos.append(clean_word)
         

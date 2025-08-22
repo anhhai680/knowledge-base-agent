@@ -197,8 +197,8 @@ class DiagramAgent:
             
         except Exception as e:
             logger.error(f"Enhanced code retrieval failed: {str(e)}")
-            # Re-raise the exception to be handled at a higher level for proper error responses
-            raise e
+            # Return empty results instead of re-raising the exception
+            return []
     
     def _multi_strategy_search(self, search_terms: List[str], repositories: List[str], intent: Dict[str, Any]) -> List[Document]:
         """
@@ -211,9 +211,6 @@ class DiagramAgent:
             
         Returns:
             List of search results
-            
-        Raises:
-            Exception: If all search strategies fail due to errors
         """
         all_results = []
         all_errors = []
@@ -226,6 +223,7 @@ class DiagramAgent:
                     all_results.extend(repo_results)
                 except Exception as e:
                     all_errors.append(f"Repository search for {repo}: {str(e)}")
+                    logger.warning(f"Repository search failed for {repo}: {str(e)}")
         
         # Strategy 2: Intent-based search
         if intent.get('preferred_type'):
@@ -234,6 +232,7 @@ class DiagramAgent:
                 all_results.extend(intent_results)
             except Exception as e:
                 all_errors.append(f"Intent-based search: {str(e)}")
+                logger.warning(f"Intent-based search failed: {str(e)}")
         
         # Strategy 3: General semantic search
         for term in search_terms:
@@ -250,11 +249,11 @@ class DiagramAgent:
             all_results.extend(pattern_results)
         except Exception as e:
             all_errors.append(f"Pattern search: {str(e)}")
+            logger.warning(f"Pattern search failed: {str(e)}")
         
-        # If we have no results and multiple errors, this suggests a systemic issue
-        if not all_results and len(all_errors) >= 3:
-            # If most search strategies failed, raise an exception
-            raise Exception(f"Multiple search strategies failed: {'; '.join(all_errors[:3])}")
+        # Log errors but don't fail completely - return whatever results we have
+        if all_errors:
+            logger.warning(f"Some search strategies failed: {'; '.join(all_errors[:3])}")
         
         return all_results
     
@@ -345,29 +344,35 @@ class DiagramAgent:
         """Search within specific repository with context awareness"""
         results = []
         
-        for term in search_terms:
-            try:
-                # Search without filtering first, then filter results
-                repo_results = self.vectorstore.similarity_search(term, k=30)
+        # Create repository-specific search query
+        if search_terms:
+            main_term = search_terms[0]
+            search_query = f"{main_term} repository:{repository}"
+        else:
+            search_query = f"repository:{repository}"
+        
+        try:
+            # Search with repository context
+            repo_results = self.vectorstore.similarity_search(search_query, k=15)
+            
+            # Filter results by repository
+            filtered_results = []
+            for result in repo_results:
+                result_repo = result.metadata.get('repository', '')
+                # Check if the repository name is contained in the result repository
+                repo_name = repository.split('/')[-1] if '/' in repository else repository
+                if repo_name.lower() in result_repo.lower():
+                    filtered_results.append(result)
+            
+            # Filter by diagram intent if available
+            if intent.get('preferred_type'):
+                intent_filtered = self._filter_by_diagram_intent(filtered_results, intent)
+                results.extend(intent_filtered)
+            else:
+                results.extend(filtered_results)
                 
-                # Filter results by repository
-                filtered_results = []
-                for result in repo_results:
-                    result_repo = result.metadata.get('repository', '')
-                    # Check if the repository name is contained in the result repository
-                    repo_name = repository.split('/')[-1] if '/' in repository else repository
-                    if repo_name.lower() in result_repo.lower():
-                        filtered_results.append(result)
-                
-                # Filter by diagram intent if available
-                if intent.get('preferred_type'):
-                    intent_filtered = self._filter_by_diagram_intent(filtered_results, intent)
-                    results.extend(intent_filtered)
-                else:
-                    results.extend(filtered_results)
-                    
-            except Exception as e:
-                logger.warning(f"Repository search failed for {repository}: {str(e)}")
+        except Exception as e:
+            logger.warning(f"Repository search failed for {repository}: {str(e)}")
         
         return results
     
@@ -379,16 +384,20 @@ class DiagramAgent:
         if not diagram_type:
             return results
         
-        # Add diagram-specific terms to search
-        enhanced_terms = search_terms + self.diagram_type_keywords.get(diagram_type, [])
+        # Create a combined search query that includes both search terms and diagram type
+        if search_terms:
+            # Use the first search term as the main query and add diagram context
+            main_term = search_terms[0]
+            search_query = f"{main_term} {diagram_type} diagram"
+        else:
+            # Fallback if no search terms
+            search_query = f"{diagram_type} diagram"
         
-        for term in enhanced_terms:
-            try:
-                search_query = f"{term} {diagram_type} diagram"
-                intent_results = self.vectorstore.similarity_search(search_query, k=10)
-                results.extend(intent_results)
-            except Exception as e:
-                logger.warning(f"Intent-based search failed for {term}: {str(e)}")
+        try:
+            intent_results = self.vectorstore.similarity_search(search_query, k=10)
+            results.extend(intent_results)
+        except Exception as e:
+            logger.warning(f"Intent-based search failed: {str(e)}")
         
         return results
     
@@ -524,7 +533,7 @@ class DiagramAgent:
         type_mapping = {
             'sequence': ['py', 'js', 'ts', 'cs'],
             'flowchart': ['py', 'js', 'ts', 'cs'],
-            'class': ['py', 'js', 'ts', 'cs'],
+            'class': ['py', 'js', 'ts', 'cs', 'java'],
             'er': ['cs', 'sql', 'py'],
             'component': ['cs', 'js', 'ts', 'py']
         }
