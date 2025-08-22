@@ -6,6 +6,10 @@ import re
 from typing import Dict, Any, List, Optional
 from ..utils.logging import get_logger
 from ..config.agent_config import AgentConfig, DiagramAgentType, DEFAULT_AGENT_CONFIG
+from .response_models import (
+    AgentResponse, ResponseStatus, ResponseType, 
+    adapt_agent_response, create_error_response, create_success_response
+)
 
 logger = get_logger(__name__)
 
@@ -42,22 +46,32 @@ class AgentRouter:
             logger.warning("DiagramAgent preferred but not provided, falling back to DiagramHandler")
             self.agent_config.routing.preferred_diagram_agent = DiagramAgentType.DIAGRAM_HANDLER
     
-    def route_query(self, question: str) -> Dict[str, Any]:
+    def route_query(self, question: str) -> AgentResponse:
         """Route query to appropriate agent based on content analysis"""
         
-        # Check for repository information requests
-        if self._is_repository_info_request(question):
-            logger.info(f"Routing to repository information: {question[:100]}...")
-            return self._generate_repository_info_response(question)
-        
-        # Detect diagram requests using enhanced pattern matching
-        if self._is_diagram_request(question):
-            logger.info(f"Routing to diagram generation: {question[:100]}...")
-            return self._generate_diagram_response(question)
-        
-        # Default to RAG agent for regular queries
-        logger.info(f"Routing to RAG agent: {question[:100]}...")
-        return self.rag_agent.process_query(question)
+        try:
+            # Check for repository information requests
+            if self._is_repository_info_request(question):
+                logger.info(f"Routing to repository information: {question[:100]}...")
+                return self._generate_repository_info_response(question)
+            
+            # Detect diagram requests using enhanced pattern matching
+            if self._is_diagram_request(question):
+                logger.info(f"Routing to diagram generation: {question[:100]}...")
+                return self._generate_diagram_response(question)
+            
+            # Default to RAG agent for regular queries
+            logger.info(f"Routing to RAG agent: {question[:100]}...")
+            raw_response = self.rag_agent.process_query(question)
+            return adapt_agent_response(raw_response, "rag")
+            
+        except Exception as e:
+            logger.error(f"Query routing failed: {str(e)}")
+            return create_error_response(
+                f"Failed to route query: {str(e)}", 
+                "routing_error", 
+                "AgentRouter"
+            )
     
     def _compile_diagram_patterns(self) -> List[re.Pattern]:
         """Pre-compile regex patterns for diagram detection with improved mermaid support"""
@@ -168,21 +182,16 @@ class AgentRouter:
         
         return any(pattern in question_lower for pattern in info_patterns)
     
-    def _generate_repository_info_response(self, query: str) -> Dict[str, Any]:
+    def _generate_repository_info_response(self, query: str) -> AgentResponse:
         """Generate repository information response"""
         try:
             available_repos = self.diagram_handler._get_available_repositories()
             
             if not available_repos:
-                return {
-                    "answer": "No repositories are currently indexed in the knowledge base. Please index some repositories first using the /index endpoint.",
-                    "source_documents": [],
-                    "status": "success",
-                    "num_sources": 0,
-                    "error": None,
-                    "mermaid_code": None,
-                    "diagram_type": None
-                }
+                return create_success_response(
+                    "No repositories are currently indexed in the knowledge base. Please index some repositories first using the /index endpoint.",
+                    ResponseType.TEXT
+                )
             
             # Analyze each repository for diagram suitability
             repo_analysis = {}
@@ -218,29 +227,22 @@ class AgentRouter:
             
             response_lines.append("💡 **Tip**: For best sequence diagrams, ask about repositories that contain business logic, services, or API endpoints.")
             
-            return {
-                "answer": "\n".join(response_lines),
-                "source_documents": [],
-                "status": "success",
-                "num_sources": len(available_repos),
-                "error": None,
-                "mermaid_code": None,
-                "diagram_type": None
-            }
+            return create_success_response(
+                "\n".join(response_lines),
+                ResponseType.ANALYSIS,
+                num_sources=len(available_repos),
+                metadata={"repositories_analyzed": len(available_repos)}
+            )
             
         except Exception as e:
             logger.error(f"Repository info generation failed: {str(e)}")
-            return {
-                "answer": "I encountered an error while retrieving repository information. Please try again.",
-                "source_documents": [],
-                "status": "error",
-                "num_sources": 0,
-                "error": str(e),
-                "mermaid_code": None,
-                "diagram_type": None
-            }
+            return create_error_response(
+                f"Repository info generation failed: {str(e)}",
+                "repo_info_error",
+                "AgentRouter"
+            )
     
-    def _generate_diagram_response(self, query: str) -> Dict[str, Any]:
+    def _generate_diagram_response(self, query: str) -> AgentResponse:
         """Generate diagram with enhanced mermaid support and intelligent agent selection"""
         try:
             # Select appropriate diagram agent
@@ -255,27 +257,15 @@ class AgentRouter:
             # Generate diagram using selected agent
             diagram_result = self._generate_with_agent(selected_agent, query)
             
-            # Enhance response for mermaid requests
-            if is_mermaid_request and diagram_result.get("mermaid_code"):
-                enhanced_answer = self._enhance_mermaid_response(diagram_result, query)
-            else:
-                # Handle different response formats from different agents
-                if diagram_result.get("answer"):
-                    # DiagramAgent format
-                    enhanced_answer = diagram_result.get("answer")
-                else:
-                    # DiagramHandler format
-                    enhanced_answer = diagram_result.get("analysis_summary", "Generated diagram")
+            # Use adapter to standardize the response
+            standardized_response = adapt_agent_response(diagram_result, "diagram")
             
-            # Format as standard QueryResponse with mermaid_code extension
-            return {
-                "answer": enhanced_answer,
-                "source_documents": diagram_result.get("source_documents", []),
-                "status": diagram_result.get("status", "success"),
-                "num_sources": len(diagram_result.get("source_documents", [])),
-                "mermaid_code": diagram_result.get("mermaid_code"),
-                "diagram_type": diagram_result.get("diagram_type", "sequence")
-            }
+            # Enhance response for mermaid requests
+            if is_mermaid_request and standardized_response.mermaid_code:
+                enhanced_answer = self._enhance_mermaid_response(diagram_result, query)
+                standardized_response.answer = enhanced_answer
+            
+            return standardized_response
             
         except Exception as e:
             logger.error(f"Diagram generation failed: {str(e)}")
@@ -283,19 +273,16 @@ class AgentRouter:
             # Attempt fallback if enabled and primary agent failed
             if self.agent_config.routing.enable_agent_fallback:
                 try:
-                    return self._attempt_fallback_diagram_generation(query, str(e))
+                    fallback_result = self._attempt_fallback_diagram_generation(query, str(e))
+                    return adapt_agent_response(fallback_result, "diagram")
                 except Exception as fallback_error:
                     logger.error(f"Fallback also failed: {str(fallback_error)}")
             
-            return {
-                "answer": "I encountered an error while generating the diagram. Please try again or ask about available flows in the codebase.",
-                "source_documents": [],
-                "status": "error",
-                "num_sources": 0,
-                "error": str(e),
-                "mermaid_code": None,
-                "diagram_type": None
-            }
+            return create_error_response(
+                f"Diagram generation failed: {str(e)}. Please try again or ask about available flows in the codebase.",
+                "diagram_generation_error",
+                "AgentRouter"
+            )
 
     def _is_mermaid_specific_request(self, query: str) -> bool:
         """Detect if the request specifically asks for mermaid format"""
@@ -442,7 +429,7 @@ class AgentRouter:
         else:
             raise ValueError(f"Agent {type(agent).__name__} has no supported interface")
     
-    def _attempt_fallback_diagram_generation(self, query: str, original_error: str) -> Dict[str, Any]:
+    def _attempt_fallback_diagram_generation(self, query: str, original_error: str) -> AgentResponse:
         """
         Attempt fallback diagram generation with alternative agent
         
@@ -470,15 +457,19 @@ class AgentRouter:
         try:
             result = self._generate_with_agent(fallback_agent, query)
             
+            # Use adapter to standardize the response
+            standardized_response = adapt_agent_response(result, "diagram")
+            
             # Add fallback notice to answer
-            if result.get("answer"):
-                result["answer"] = f"⚠️ **Fallback Response**: Generated using {fallback_name} due to primary agent error.\n\n{result['answer']}"
+            if standardized_response.answer:
+                standardized_response.answer = f"⚠️ **Fallback Response**: Generated using {fallback_name} due to primary agent error.\n\n{standardized_response.answer}"
             
             # Mark as fallback in metadata
-            result["fallback_used"] = True
-            result["original_error"] = original_error
+            standardized_response.metadata["fallback_used"] = True
+            standardized_response.metadata["original_error"] = original_error
+            standardized_response.metadata["fallback_agent"] = fallback_name
             
-            return result
+            return standardized_response
             
         except Exception as e:
             raise Exception(f"Both agents failed - Primary: {original_error}, Fallback: {str(e)}")

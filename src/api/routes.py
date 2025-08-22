@@ -338,20 +338,21 @@ async def query_knowledge_base(request: QueryRequest):
         # Use agent router to handle all query types
         result = agent_router.route_query(request.question)
         
+        # Convert AgentResponse to QueryResponse format
         return QueryResponse(
-            answer=result["answer"],
-            source_documents=result["source_documents"],
-            status=result["status"],
-            num_sources=result["num_sources"],
-            error=result.get("error"),
+            answer=result.answer,
+            source_documents=result.source_documents,
+            status=result.status.value,
+            num_sources=result.num_sources,
+            error=result.error,
             # Include extended fields if present (for diagram responses)
-            mermaid_code=result.get("mermaid_code"),
-            diagram_type=result.get("diagram_type"),
+            mermaid_code=result.mermaid_code,
+            diagram_type=result.diagram_type,
             # Include new enhancement fields for advanced RAG
-            reasoning_steps=result.get("reasoning_steps"),
-            query_analysis=result.get("query_analysis"),
-            context_quality_score=result.get("context_quality_score"),
-            enhancement_iterations=result.get("enhancement_iterations")
+            reasoning_steps=result.reasoning_steps,
+            query_analysis=result.query_analysis,
+            context_quality_score=result.context_quality_score,
+            enhancement_iterations=result.enhancement_iterations
         )
     except Exception as e:
         logger.error(f"Error querying knowledge base: {str(e)}")
