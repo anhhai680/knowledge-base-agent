@@ -10,6 +10,9 @@ import re
 from typing import Dict, Any, List
 from dataclasses import dataclass
 from langchain.docstore.document import Document
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -100,7 +103,7 @@ class QueryOptimizer:
             'flowchart': ['flowchart', 'flow', 'process', 'workflow', 'decision', 'steps', 'control flow'],
             'class': ['class', 'structure', 'object', 'inheritance', 'composition', 'uml class'],
             'er': ['entity', 'relationship', 'database', 'schema', 'table', 'data model'],
-            'component': ['component', 'architecture', 'system', 'module', 'service', 'microservice']
+            'component': ['component', 'architecture', 'system', 'module', 'service', 'microservice', 'architectural', 'system design', 'service architecture']
         }
     
     def optimize_for_diagrams(self, query: str) -> str:
@@ -144,7 +147,7 @@ class QueryOptimizer:
         }
         
         # Check if this is a diagram request
-        diagram_indicators = ['diagram', 'visualize', 'show', 'draw', 'create', 'generate']
+        diagram_indicators = ['diagram', 'visualize', 'show', 'draw', 'create', 'generate', 'architecture', 'system design']
         if any(indicator in query_lower for indicator in diagram_indicators):
             intent['is_diagram_request'] = True
             intent['confidence'] += 0.3
@@ -162,7 +165,7 @@ class QueryOptimizer:
             intent['confidence'] += 0.4
         
         # Additional confidence for specific technical terms
-        technical_terms = ['api', 'database', 'class', 'function', 'method', 'service', 'component']
+        technical_terms = ['api', 'database', 'class', 'function', 'method', 'service', 'component', 'controller', 'repository']
         tech_score = sum(1 for term in technical_terms if term in query_lower)
         intent['confidence'] += min(tech_score * 0.1, 0.3)
         
@@ -193,9 +196,14 @@ class RepositoryFilter:
         """
         repositories = []
         
+        # First, check for explicit repository patterns
         for pattern in self.repository_patterns:
             matches = re.findall(pattern, query, re.IGNORECASE)
             repositories.extend(matches)
+        
+        # If no explicit repository found, try to infer from service names
+        if not repositories:
+            repositories = self._infer_repository_from_service(query)
         
         # Clean and validate repository names
         cleaned_repos = []
@@ -206,6 +214,51 @@ class RepositoryFilter:
                 cleaned_repos.append(repo)
         
         return list(set(cleaned_repos))
+    
+    def _infer_repository_from_service(self, query: str) -> List[str]:
+        """
+        Infer repository from service names mentioned in the query
+        
+        Args:
+            query: User query
+            
+        Returns:
+            List of inferred repository names
+        """
+        query_lower = query.lower()
+        inferred_repos = []
+        
+        logger.info(f"Inferring repository from service query: {query}")
+        
+        # Extract potential repository names from the query
+        # Look for patterns like "open swe", "my-project", "service-name"
+        words = query_lower.split()
+        
+        # Look for repository-like patterns (words that could be repo names)
+        for word in words:
+            # Skip common words and very short terms
+            if len(word) < 3 or word in ['the', 'and', 'or', 'for', 'with', 'from', 'to', 'in', 'on', 'at', 'by', 'of', 'a', 'an']:
+                continue
+            
+            # Clean up the word (remove special characters)
+            clean_word = re.sub(r'[^\w\-_]', '', word)
+            if len(clean_word) >= 3:
+                # Check if this looks like a repository name
+                if '-' in clean_word or '_' in clean_word or clean_word.islower():
+                    logger.info(f"Found potential repository name: '{clean_word}'")
+                    inferred_repos.append(clean_word)
+        
+        # If no specific patterns found, try to extract from context
+        if not inferred_repos:
+            logger.info("No specific repository patterns found, checking for architecture context...")
+            # Look for architecture-related terms that might indicate a specific service
+            architecture_terms = ['architecture', 'system design', 'service architecture', 'sequence', 'diagram']
+            if any(term in query_lower for term in architecture_terms):
+                # Don't default to any specific service - let the search find what's available
+                logger.info("Architecture context detected, will search available repositories")
+        
+        logger.info(f"Repository inference result: {inferred_repos}")
+        return inferred_repos
     
     def filter_by_repository(self, documents: List[Document], repositories: List[str]) -> List[Document]:
         """
@@ -224,8 +277,16 @@ class RepositoryFilter:
         filtered = []
         for doc in documents:
             doc_repo = doc.metadata.get('repository', '')
-            if any(repo.lower() in doc_repo.lower() for repo in repositories):
-                filtered.append(doc)
+            if doc_repo:
+                # Check if any of the specified repositories match the document repository
+                for repo in repositories:
+                    # More flexible matching - check if repo name is contained in the full repository URL
+                    if repo.lower() in doc_repo.lower() or doc_repo.lower().endswith(f'/{repo.lower()}'):
+                        filtered.append(doc)
+                        break  # Found a match, no need to check other repos
+            else:
+                # If no repository metadata, skip the document for strict filtering
+                continue
         
         return filtered
     

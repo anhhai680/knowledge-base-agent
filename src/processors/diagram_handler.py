@@ -507,7 +507,7 @@ class DiagramHandler:
                     method = interaction.get('method', 'unknownMethod')
                     relevance = interaction.get('relevance', 'medium')
                     
-                    # Normalize service names to avoid duplicates (e.g., OrderService -> CarOrderService)
+                    # Normalize service names to avoid duplicates (e.g., OrderService -> OrderService)
                     caller = self._normalize_participant_name(caller)
                     callee = self._normalize_participant_name(callee)
                     
@@ -601,20 +601,14 @@ class DiagramHandler:
     def _normalize_participant_name(self, participant: str) -> Optional[str]:
         """Normalize participant names to avoid duplicates"""
         # Handle common service name variations
-        if participant == 'OrderService':
-            return 'CarOrderService'
-        elif participant == 'ListingService':
-            return 'CarListingService'
-        elif participant == 'NotificationService':
-            return 'CarNotificationService'
-        elif participant == 'Client':
-            return 'CarWebClient'
-        elif participant == 'ExternalAPI':
-            # Don't include ExternalAPI - return None to filter out
-            return None
-        elif participant == 'UnknownService':
+        if participant == 'UnknownService':
             # Don't include UnknownService - return None to filter out
             return None
+        
+        # Convert to PascalCase if needed
+        if '-' in participant or '_' in participant:
+            words = participant.replace('-', ' ').replace('_', ' ').split()
+            return ''.join(word.capitalize() for word in words)
         
         return participant
     
@@ -888,10 +882,10 @@ class DiagramHandler:
         # Extract specific workflows/processes mentioned
         workflow_patterns = [
             r'\b(login|authentication|auth|signin|signup)\b',
-            r'\b(order|purchase|buy|checkout|payment)\b', 
-            r'\b(car|vehicle|listing|inventory)\b',
-            r'\b(user|customer|client|account)\b',
-            r'\b(notification|alert|message|email)\b',
+            r'\b(create|add|insert|post)\b', 
+            r'\b(read|get|fetch|retrieve)\b',
+            r'\b(update|modify|edit|put|patch)\b',
+            r'\b(delete|remove|cancel|destroy)\b',
             r'\b(api|service|endpoint|controller)\b',
             r'\b(database|data|storage|persistence)\b',
             r'\b(search|filter|query|find)\b'
@@ -905,12 +899,48 @@ class DiagramHandler:
                 # Add related search terms based on context
                 if match in ['login', 'authentication', 'auth', 'signin']:
                     search_terms.extend(['authenticate', 'login', 'user', 'credential', 'token'])
-                elif match in ['order', 'purchase', 'buy', 'checkout']:
-                    search_terms.extend(['order', 'purchase', 'cart', 'payment', 'transaction'])
-                elif match in ['car', 'vehicle', 'listing']:
-                    search_terms.extend(['car', 'vehicle', 'listing', 'inventory', 'catalog'])
+                elif match in ['create', 'add', 'insert', 'post']:
+                    search_terms.extend(['create', 'add', 'insert', 'post', 'new'])
+                elif match in ['read', 'get', 'fetch', 'retrieve']:
+                    search_terms.extend(['read', 'get', 'fetch', 'retrieve', 'find'])
+                elif match in ['update', 'modify', 'edit', 'put', 'patch']:
+                    search_terms.extend(['update', 'modify', 'edit', 'put', 'patch'])
+                elif match in ['delete', 'remove', 'cancel', 'destroy']:
+                    search_terms.extend(['delete', 'remove', 'cancel', 'destroy'])
                 elif match in ['user', 'customer', 'client']:
                     search_terms.extend(['user', 'customer', 'profile', 'account'])
+        
+        # Add domain-specific search terms based on what's actually in the query
+        domain_indicators = {
+            'service': ['service', 'controller', 'repository', 'model', 'entity', 'data', 'crud'],
+            'api': ['api', 'endpoint', 'http', 'rest', 'swagger', 'openapi'],
+            'data': ['data', 'model', 'entity', 'table', 'database', 'schema'],
+            'auth': ['auth', 'login', 'user', 'security', 'credential'],
+            'search': ['search', 'find', 'query', 'filter', 'get'],
+            'create': ['create', 'add', 'insert', 'post'],
+            'update': ['update', 'modify', 'edit', 'put', 'patch'],
+            'delete': ['delete', 'remove', 'cancel', 'destroy']
+        }
+        
+        # Add domain-specific terms based on what's actually in the query
+        for domain, terms in domain_indicators.items():
+            if domain in query_lower:
+                search_terms.extend([term for term in terms if term not in search_terms])
+        
+        # Look for domain-specific patterns in the query
+        domain_patterns = [
+            r'\b(service|api|endpoint)\b',
+            r'\b(data|model|entity|table)\b',
+            r'\b(auth|login|user|security)\b',
+            r'\b(search|find|query|filter)\b',
+            r'\b(create|add|insert|post)\b',
+            r'\b(update|modify|edit|put|patch)\b',
+            r'\b(delete|remove|cancel|destroy)\b'
+        ]
+        
+        for pattern in domain_patterns:
+            matches = re.findall(pattern, query, re.IGNORECASE)
+            search_terms.extend(matches)
         
         # Extract HTTP methods and endpoints mentioned
         http_patterns = [
