@@ -117,6 +117,19 @@ class BaseChunker(ABC):
         """
         return file_extension.lower() in [ext.lower() for ext in self.get_supported_extensions()]
     
+    def configure(self, config: Dict[str, Any]) -> None:
+        """
+        Configure the chunker with new settings.
+        
+        Args:
+            config: Configuration dictionary containing chunking settings
+        """
+        if 'max_chunk_size' in config:
+            self.max_chunk_size = config['max_chunk_size']
+        
+        if 'chunk_overlap' in config:
+            self.chunk_overlap = config['chunk_overlap']
+    
     def _create_chunk_document(
         self,
         content: str,

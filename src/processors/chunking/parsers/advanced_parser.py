@@ -91,10 +91,17 @@ class AdvancedParser(ABC):
                 raise AdvancedParserError("Failed to load tree-sitter language")
                 
             self._parser = ts.Parser()
+            # Handle different tree-sitter API versions
             try:
-                self._parser.set_language(self._language)
-            except AttributeError:
+                # New API (tree-sitter >= 0.20.0)
                 self._parser.language = self._language
+            except AttributeError:
+                try:
+                    # Old API (tree-sitter < 0.20.0)
+                    self._parser.set_language(self._language)
+                except AttributeError:
+                    # Fallback - try to set directly
+                    self._parser.language = self._language
             logger.debug(f"Initialized tree-sitter parser for {self.language_name}")
             
         except Exception as e:
@@ -153,6 +160,99 @@ class AdvancedParser(ABC):
             List of extracted semantic elements
         """
         pass
+    
+    def _extract_element_from_node(self, node: ts.Node, source_code: str) -> Optional[SemanticElement]:
+        """
+        Extract a semantic element from a single tree-sitter node.
+        
+        Args:
+            node: Tree-sitter node to process
+            source_code: Original source code
+            
+        Returns:
+            SemanticElement if successfully extracted, None otherwise
+        """
+        try:
+            # This is a base implementation - subclasses should override
+            # to provide language-specific extraction logic
+            return None
+        except Exception as e:
+            logger.debug(f"Error extracting element from node {node.type}: {e}")
+            return None
+    
+    def _filter_valid_nodes(self, root_node: ts.Node, source_code: str) -> List[ts.Node]:
+        """
+        Pre-filter tree-sitter nodes to identify valid ones before processing.
+        
+        Args:
+            root_node: Root node of the syntax tree
+            source_code: Original source code
+            
+        Returns:
+            List of valid nodes that can be safely processed
+        """
+        valid_nodes = []
+        source_length = len(source_code)
+        
+        def traverse_and_filter(node: ts.Node):
+            try:
+                # Check if node has valid positions
+                if (node.start_byte >= 0 and node.end_byte >= 0 and
+                    node.start_byte < source_length and node.end_byte <= source_length and
+                    node.start_byte < node.end_byte):
+                    
+                    # Check if this is a node type we want to process
+                    if self._is_processable_node_type(node.type):
+                        valid_nodes.append(node)
+                    
+                    # Continue traversing children
+                    for child in node.children:
+                        traverse_and_filter(child)
+                        
+            except Exception as e:
+                logger.debug(f"Error filtering node {getattr(node, 'type', 'unknown')}: {e}")
+                # Skip this node but continue with siblings
+                pass
+        
+        traverse_and_filter(root_node)
+        return valid_nodes
+    
+    def _is_processable_node_type(self, node_type: str) -> bool:
+        """
+        Check if a node type should be processed for semantic extraction.
+        
+        Args:
+            node_type: Type of the tree-sitter node
+            
+        Returns:
+            True if the node type should be processed
+        """
+        # Only process nodes that represent meaningful semantic elements
+        processable_types = {
+            'using_directive',
+            'namespace_declaration',
+            'class_declaration',
+            'interface_declaration',
+            'struct_declaration',
+            'enum_declaration',
+            'record_declaration',
+            'method_declaration',
+            'property_declaration',
+            'field_declaration',
+            'constructor_declaration',
+            'destructor_declaration',
+            'event_declaration',
+            'indexer_declaration',
+            'operator_declaration',
+            'conversion_operator_declaration',
+            'delegate_declaration',
+            'global_statement',
+            'function_declaration',
+            'variable_declaration',
+            'constant_declaration',
+        }
+        
+        return node_type in processable_types
     
     def parse(self, source_code: str, file_path: Optional[str] = None) -> ParseResult:
         """
@@ -324,6 +424,20 @@ class AdvancedParser(ABC):
                         logger.warning(f"Element '{element.name}' has invalid byte range after fix, skipping content extraction")
                         element.content = ""
                         continue
+                    
+                    # Try to re-extract content with fixed positions
+                    try:
+                        extracted_content = source_code[element.position.start_byte:element.position.end_byte]
+                        if extracted_content.strip():
+                            element.content = extracted_content
+                            logger.debug(f"Fixed content for element '{element.name}' using corrected positions")
+                        else:
+                            logger.warning(f"Fixed positions for element '{element.name}' but no content extracted")
+                            element.content = ""
+                    except IndexError:
+                        logger.warning(f"Still cannot extract content for element '{element.name}' after position fix")
+                        element.content = ""
+                        continue
                 
                 if element.position.start_line < 1 or element.position.end_line > len(source_lines):
                     logger.warning(f"Element '{element.name}' has invalid line position: {element.position.start_line}-{element.position.end_line}, total lines: {len(source_lines)}")
@@ -414,13 +528,30 @@ class AdvancedParser(ABC):
             if (node.start_byte < 0 or node.end_byte < 0 or 
                 node.start_byte >= len(source_code) or node.end_byte > len(source_code)):
                 logger.warning(f"Node has invalid byte positions: {node.start_byte}-{node.end_byte}, source length: {len(source_code)}")
-                return ""
+                # Try to fix the positions if possible
+                start_byte = max(0, min(node.start_byte, len(source_code) - 1))
+                end_byte = max(start_byte + 1, min(node.end_byte, len(source_code)))
+                
+                if start_byte >= end_byte:
+                    logger.warning(f"Could not fix node positions, skipping text extraction")
+                    return ""
+                
+                # Use fixed positions
+                extracted_text = source_code[start_byte:end_byte]
+                logger.debug(f"Extracted text using fixed positions {start_byte}-{end_byte}")
+                return extracted_text
             
             # Ensure start_byte <= end_byte
             if node.start_byte > node.end_byte:
                 logger.warning(f"Node has invalid byte range: start_byte ({node.start_byte}) > end_byte ({node.end_byte})")
-                return ""
+                # Swap positions if they're reversed
+                start_byte = node.end_byte
+                end_byte = node.start_byte
+                extracted_text = source_code[start_byte:end_byte]
+                logger.debug(f"Extracted text using swapped positions {start_byte}-{end_byte}")
+                return extracted_text
             
+            # Normal case - positions are valid
             extracted_text = source_code[node.start_byte:node.end_byte]
             return extracted_text
             

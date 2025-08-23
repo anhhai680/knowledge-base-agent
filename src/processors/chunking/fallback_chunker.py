@@ -62,6 +62,24 @@ class FallbackChunker(BaseChunker):
         """
         return True
     
+    def configure(self, config: Dict[str, Any]) -> None:
+        """
+        Configure the fallback chunker with new settings.
+        
+        Args:
+            config: Configuration dictionary containing chunking settings
+        """
+        # Call parent configure method
+        super().configure(config)
+        
+        # Recreate text splitter with new settings
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.max_chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            length_function=len,
+            separators=["\n\n", "\n", " ", ""]
+        )
+    
     def chunk_document(self, document: Document) -> List[Document]:
         """
         Chunk document using recursive character splitting.

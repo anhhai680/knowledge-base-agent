@@ -47,7 +47,7 @@ class CSharpChunker(BaseChunker):
     Falls back to regex-based parsing if tree-sitter parsing fails.
     """
     
-    def __init__(self, max_chunk_size: int = 2000, chunk_overlap: int = 50, use_advanced_parsing: Optional[bool] = None, force_regex_fallback: bool = False):
+    def __init__(self, max_chunk_size: int = 2000, chunk_overlap: int = 50, use_advanced_parsing: Optional[bool] = None):
         """
         Initialize C# chunker.
         
@@ -55,7 +55,6 @@ class CSharpChunker(BaseChunker):
             max_chunk_size: Maximum size for chunks in characters
             chunk_overlap: Number of characters to overlap between chunks
             use_advanced_parsing: Whether to use tree-sitter advanced parsing. If None, uses environment variable USE_ADVANCED_PARSING.
-            force_regex_fallback: Force use of regex-based parsing instead of tree-sitter
         """
         super().__init__(max_chunk_size, chunk_overlap)
         
@@ -65,10 +64,6 @@ class CSharpChunker(BaseChunker):
             self.use_advanced_parsing = settings.use_advanced_parsing
         else:
             self.use_advanced_parsing = use_advanced_parsing
-        
-        # Force regex fallback if requested
-        if force_regex_fallback:
-            self.use_advanced_parsing = False
         
         # Initialize advanced parser
         self.advanced_parser = None
@@ -90,9 +85,14 @@ class CSharpChunker(BaseChunker):
         # C# language patterns
         self.using_pattern = re.compile(r'^\s*using\s+[^;]+;', re.MULTILINE)
         self.namespace_pattern = re.compile(r'^\s*namespace\s+([^\s{]+)', re.MULTILINE)
-        self.class_pattern = re.compile(r'^\s*(public|private|protected|internal)?\s*(abstract|sealed|static)?\s*(class|interface|struct|enum)\s+(\w+)', re.MULTILINE)
-        self.method_pattern = re.compile(r'^\s*(public|private|protected|internal)?\s*(static|virtual|override|abstract)?\s*(\w+(?:\[\])?)\s+(\w+)\s*\([^{]*\)\s*{?', re.MULTILINE)
-        self.property_pattern = re.compile(r'^\s*(public|private|protected|internal)?\s*(static)?\s*(\w+(?:\[\])?)\s+(\w+)\s*{\s*(get|set)', re.MULTILINE)
+        # Updated class pattern to handle partial classes and other modifiers
+        self.class_pattern = re.compile(r'^\s*(public|private|protected|internal)?\s*(abstract|sealed|static|partial|readonly|record)?\s*(class|interface|struct|enum|record)\s+(\w+)', re.MULTILINE)
+        # Updated method pattern to handle more C# syntax
+        self.method_pattern = re.compile(r'^\s*(public|private|protected|internal)?\s*(static|virtual|override|abstract|partial|async|sealed)?\s*(\w+(?:\[\])?)\s+(\w+)\s*\([^{]*\)\s*{?', re.MULTILINE)
+        # Updated property pattern to handle more C# syntax
+        self.property_pattern = re.compile(r'^\s*(public|private|protected|internal)?\s*(static|virtual|override|abstract|partial|readonly)?\s*(\w+(?:\[\])?)\s+(\w+)\s*{\s*(get|set)', re.MULTILINE)
+        # Constructor pattern
+        self.constructor_pattern = re.compile(r'^\s*(public|private|protected|internal)?\s*(\w+)\s*\([^{]*\)\s*{?', re.MULTILINE)
     
     def get_supported_extensions(self) -> List[str]:
         """
@@ -116,32 +116,10 @@ class CSharpChunker(BaseChunker):
         if not self.use_advanced_parsing or not self.advanced_parser:
             return False
         
-        # Check for problematic patterns that might cause tree-sitter issues
-        problematic_patterns = [
-            # Very long lines (can cause tree-sitter position issues)
-            r'.{1000,}',  # Lines longer than 1000 characters
-            
-            # Complex generic patterns that might confuse tree-sitter
-            r'<[^>]*<[^>]*>',  # Nested generics
-            
-            # Unusual C# syntax patterns
-            r'@".*"',  # Verbatim strings
-            r'\$\".*\"',  # Interpolated strings
-            
-            # Very large files
-            len(content) > 1000000,  # Files larger than 1MB
-        ]
-        
-        # Check for problematic patterns
-        for pattern in problematic_patterns:
-            if isinstance(pattern, str):
-                import re
-                if re.search(pattern, content, re.MULTILINE | re.DOTALL):
-                    logger.info("Detected problematic C# pattern, using regex fallback")
-                    return False
-            elif pattern:  # Boolean pattern
-                logger.info("File too large for advanced parsing, using regex fallback")
-                return False
+        # Check for very large files that might cause memory issues
+        if len(content) > 1000000:  # Files larger than 1MB
+            logger.info("File too large for advanced parsing, using regex fallback")
+            return False
         
         return True
     
@@ -163,21 +141,26 @@ class CSharpChunker(BaseChunker):
                 logger.warning("Empty C# document content after cleaning")
                 return []
             
-            # Check if we should use advanced parsing
+            # Log file information for debugging
+            file_path = document.metadata.get('file_path', 'unknown.cs')
+            logger.debug(f"Processing C# file: {file_path} (size: {len(cleaned_content)} chars)")
+            
+            # Try advanced parsing first
             if self._should_use_advanced_parsing(cleaned_content):
+                logger.info(f"Attempting tree-sitter parsing for {file_path}")
                 try:
                     return self._chunk_with_advanced_parsing(document, cleaned_content)
                 except (FallbackError, AdvancedParserError) as e:
-                    logger.warning(f"Advanced parsing failed, falling back to regex: {e}")
+                    logger.warning(f"Advanced parsing failed for {file_path}, falling back to regex: {e}")
                 except Exception as e:
-                    logger.error(f"Unexpected error in advanced parsing: {e}")
+                    logger.error(f"Unexpected error in advanced parsing for {file_path}: {e}")
             
             # Fall back to regex-based parsing
-            logger.info("Using regex-based C# parsing")
+            logger.info(f"Using regex-based C# parsing for {file_path}")
             return self._chunk_with_regex_parsing(document, cleaned_content)
             
         except Exception as e:
-            logger.error(f"Error in C# chunking: {str(e)}")
+            logger.error(f"Error in C# chunking for {document.metadata.get('file_path', 'unknown')}: {str(e)}")
             # Ultimate fallback - simple text chunking
             return self._fallback_chunk(document, cleaned_content)
     
@@ -604,6 +587,8 @@ class CSharpChunker(BaseChunker):
             class_matches = list(self.class_pattern.finditer(code))
             for match in class_matches:
                 access_modifier = match.group(1) or "internal"
+                # Handle additional modifiers (abstract, sealed, static, partial, readonly, record)
+                additional_modifiers = match.group(2) or ""
                 class_type = match.group(3)
                 class_name = match.group(4)
                 start_line = code[:match.start()].count('\n') + 1
@@ -647,6 +632,8 @@ class CSharpChunker(BaseChunker):
             method_matches = list(self.method_pattern.finditer(code))
             for match in method_matches:
                 access_modifier = match.group(1) or "private"
+                # Handle additional modifiers (static, virtual, override, abstract, partial, async, sealed)
+                additional_modifiers = match.group(2) or ""
                 return_type = match.group(3)
                 method_name = match.group(4)
                 start_line = code[:match.start()].count('\n') + 1
@@ -675,6 +662,40 @@ class CSharpChunker(BaseChunker):
                         start_line=start_line,
                         end_line=end_line,
                         content=method_content,
+                        access_modifier=access_modifier
+                    ))
+            
+            # Find constructors
+            constructor_matches = list(self.constructor_pattern.finditer(code))
+            for match in constructor_matches:
+                access_modifier = match.group(1) or "private"
+                constructor_name = match.group(2)
+                start_line = code[:match.start()].count('\n') + 1
+                
+                # Find constructor body using balanced brace counting
+                constructor_start = match.end()
+                if code[constructor_start-1:constructor_start] == '{':
+                    brace_count = 1
+                    constructor_end = constructor_start
+                    
+                    for i, char in enumerate(code[constructor_start:], constructor_start):
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                constructor_end = i + 1
+                                break
+                    
+                    end_line = code[:constructor_end].count('\n') + 1
+                    constructor_content = code[match.start():constructor_end]
+                    
+                    elements.append(CSharpElement(
+                        name=constructor_name,
+                        element_type="constructor",
+                        start_line=start_line,
+                        end_line=end_line,
+                        content=constructor_content,
                         access_modifier=access_modifier
                     ))
             

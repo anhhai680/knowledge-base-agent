@@ -52,37 +52,118 @@ class CSharpAdvancedParser(AdvancedParser):
     
     def _get_tree_sitter_language(self) -> ts.Language:
         """Get C# tree-sitter language."""
-        return ts.Language(ts_csharp.language())
+        try:
+            language = ts.Language(ts_csharp.language())
+            logger.debug(f"Successfully loaded C# tree-sitter language: {language}")
+            return language
+        except Exception as e:
+            logger.error(f"Failed to load C# tree-sitter language: {e}")
+            raise
     
     def _extract_semantic_elements(self, tree: ts.Tree, source_code: str) -> List[SemanticElement]:
-        """Extract semantic elements from C# syntax tree."""
+        """Extract semantic elements from C# syntax tree with enhanced validation."""
         elements = []
-        self._current_namespace = ""
+        source_length = len(source_code)
         
-        # Process the root compilation unit
-        root = tree.root_node
-        elements.extend(self._process_compilation_unit(root, source_code))
+        try:
+            # Process the compilation unit properly - this is the root of C# files
+            root_node = tree.root_node
+            logger.debug(f"C# root node type: {root_node.type}")
+            
+            if root_node.type == "compilation_unit":
+                # Process compilation unit children directly
+                elements = self._process_compilation_unit(root_node, source_code)
+                logger.debug(f"Processed compilation unit, found {len(elements)} elements")
+            else:
+                # Fallback to the old method for other node types
+                logger.debug(f"Using fallback node processing for root type: {root_node.type}")
+                valid_nodes = self._filter_valid_nodes(root_node, source_code)
+                
+                for node in valid_nodes:
+                    try:
+                        element = self._extract_element_from_node(node, source_code)
+                        if element and element.content:
+                            elements.append(element)
+                    except Exception as e:
+                        logger.debug(f"Skipping problematic C# node {node.type}: {e}")
+                        continue
+            
+        except Exception as e:
+            logger.warning(f"Error during C# semantic element extraction: {e}")
+            logger.debug(f"Exception details: {e}", exc_info=True)
         
         return elements
+    
+    def _extract_element_from_node(self, node: ts.Node, source_code: str) -> Optional[SemanticElement]:
+        """
+        Extract a semantic element from a single C# tree-sitter node.
+        
+        Args:
+            node: Tree-sitter node to process
+            source_code: Original source code
+            
+        Returns:
+            SemanticElement if successfully extracted, None otherwise
+        """
+        try:
+            node_type = node.type
+            
+            if node_type == "using_directive":
+                return self._extract_using_directive(node, source_code)
+            elif node_type == "namespace_declaration":
+                # Handle namespace specially since it can have multiple elements
+                namespace_elements = self._extract_namespace_declaration(node, source_code)
+                return namespace_elements[0] if namespace_elements else None
+            elif node_type in ["class_declaration", "interface_declaration", "struct_declaration", 
+                              "enum_declaration", "record_declaration"]:
+                return self._extract_type_declaration(node, source_code)
+            elif node_type in ["method_declaration", "property_declaration", "field_declaration",
+                              "constructor_declaration", "destructor_declaration"]:
+                return self._extract_member_declaration(node, source_code)
+            else:
+                # Skip unhandled node types
+                return None
+                
+        except Exception as e:
+            logger.debug(f"Error extracting C# element from node {node.type}: {e}")
+            return None
     
     def _process_compilation_unit(self, node: ts.Node, source_code: str) -> List[SemanticElement]:
         """Process the top-level compilation unit."""
         elements = []
         
         for child in node.children:
-            if child.type == "using_directive":
-                if self.include_using_statements:
-                    elements.append(self._extract_using_directive(child, source_code))
-            elif child.type == "namespace_declaration":
-                elements.extend(self._extract_namespace_declaration(child, source_code))
-            elif child.type in ["class_declaration", "interface_declaration", "struct_declaration", 
-                              "enum_declaration", "record_declaration"]:
-                elements.append(self._extract_type_declaration(child, source_code))
-            elif child.type in ["method_declaration", "property_declaration", "field_declaration",
-                              "constructor_declaration", "destructor_declaration"]:
-                elements.append(self._extract_member_declaration(child, source_code))
+            try:
+                if child.type == "using_directive":
+                    if self.include_using_statements:
+                        element = self._extract_using_directive(child, source_code)
+                        if element:
+                            elements.append(element)
+                elif child.type == "namespace_declaration":
+                    namespace_elements = self._extract_namespace_declaration(child, source_code)
+                    if namespace_elements:
+                        elements.extend([e for e in namespace_elements if e])
+                elif child.type in ["class_declaration", "interface_declaration", "struct_declaration", 
+                                  "enum_declaration", "record_declaration"]:
+                    element = self._extract_type_declaration(child, source_code)
+                    if element:
+                        elements.append(element)
+                elif child.type in ["method_declaration", "property_declaration", "field_declaration",
+                                  "constructor_declaration", "destructor_declaration"]:
+                    element = self._extract_member_declaration(child, source_code)
+                    if element:
+                        elements.append(element)
+                else:
+                    logger.debug(f"Skipping unhandled compilation unit child: {child.type}")
+            except Exception as e:
+                logger.debug(f"Error processing compilation unit child {child.type}: {e}")
+                continue
         
-        return elements
+        # Filter out any None elements and validate content
+        valid_elements = [e for e in elements if e and e.content and e.content.strip()]
+        logger.debug(f"Compilation unit processing complete: {len(elements)} total, {len(valid_elements)} valid")
+        
+        return valid_elements
     
     def _extract_using_directive(self, node: ts.Node, source_code: str) -> SemanticElement:
         """Extract using directive information."""
@@ -137,20 +218,32 @@ class CSharpAdvancedParser(AdvancedParser):
             }
         )
         
-        # Process namespace body
+        # Process namespace body and extract all elements
         body_node = self._find_child_by_type(node, "declaration_list")
         if body_node:
             for child in body_node.children:
                 if child.type in ["class_declaration", "interface_declaration", "struct_declaration",
                                 "enum_declaration", "record_declaration"]:
-                    namespace_element.add_child(self._extract_type_declaration(child, source_code))
+                    type_element = self._extract_type_declaration(child, source_code)
+                    if type_element:
+                        # Add as child to namespace for hierarchy
+                        namespace_element.add_child(type_element)
+                        # Also add as separate top-level element
+                        elements.append(type_element)
                 elif child.type in ["method_declaration", "property_declaration", "field_declaration"]:
-                    namespace_element.add_child(self._extract_member_declaration(child, source_code))
+                    member_element = self._extract_member_declaration(child, source_code)
+                    if member_element:
+                        namespace_element.add_child(member_element)
+                        # Also add as separate top-level element
+                        elements.append(member_element)
                 elif child.type == "namespace_declaration":
                     nested_namespaces = self._extract_namespace_declaration(child, source_code)
                     for ns in nested_namespaces:
                         namespace_element.add_child(ns)
+                        # Add nested namespaces as separate elements too
+                        elements.append(ns)
         
+        # Add the namespace element itself
         elements.append(namespace_element)
         
         # Restore namespace context
