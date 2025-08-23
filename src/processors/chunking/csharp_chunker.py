@@ -79,7 +79,7 @@ class CSharpChunker(BaseChunker):
                 })
                 logger.info("C# chunker initialized with tree-sitter advanced parsing")
             except Exception as e:
-                logger.warning(f"Failed to initialize C# advanced parser, falling back to regex: {e}")
+                logger.error(f"Failed to initialize C# advanced parser, falling back to regex: {e}")
                 self.use_advanced_parsing = False
         
         # C# language patterns

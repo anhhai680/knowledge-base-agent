@@ -210,7 +210,7 @@ class AdvancedParser(ABC):
                         traverse_and_filter(child)
                         
             except Exception as e:
-                logger.debug(f"Error filtering node {getattr(node, 'type', 'unknown')}: {e}")
+                logger.error(f"Error filtering node {getattr(node, 'type', 'unknown')}: {e}")
                 # Skip this node but continue with siblings
                 pass
         
@@ -281,6 +281,7 @@ class AdvancedParser(ABC):
             # Validate input
             if not source_code.strip():
                 result.add_warning("Empty source code provided")
+                logger.warning("Empty source code provided")
                 return result
             
             if len(source_code.encode('utf-8')) > self.max_file_size:
@@ -297,6 +298,7 @@ class AdvancedParser(ABC):
             if tree.root_node.has_error:
                 error_msg = "Tree-sitter found syntax errors in source code"
                 if self.enable_error_recovery:
+                    logger.warning(f"{error_msg}, attempting partial parsing")
                     result.add_warning(f"{error_msg}, attempting partial parsing")
                     # Continue with partial parsing
                 else:
@@ -349,6 +351,7 @@ class AdvancedParser(ABC):
                 source_bytes = source_code.encode('utf-8')
                 result[0] = self._parser.parse(source_bytes)
             except Exception as e:
+                logger.error(f"Parsing error: {e}")
                 error[0] = e
         
         # Run parsing in a separate thread with timeout
@@ -430,7 +433,7 @@ class AdvancedParser(ABC):
                         extracted_content = source_code[element.position.start_byte:element.position.end_byte]
                         if extracted_content.strip():
                             element.content = extracted_content
-                            logger.debug(f"Fixed content for element '{element.name}' using corrected positions")
+                            logger.warning(f"Fixed content for element '{element.name}' using corrected positions")
                         else:
                             logger.warning(f"Fixed positions for element '{element.name}' but no content extracted")
                             element.content = ""
@@ -456,14 +459,14 @@ class AdvancedParser(ABC):
                     try:
                         extracted_content = source_code[element.position.start_byte:element.position.end_byte]
                         if element.content.strip() != extracted_content.strip():
-                            logger.debug(f"Element '{element.name}' content may not match position, updating content")
+                            logger.warning(f"Element '{element.name}' content may not match position, updating content")
                             element.content = extracted_content
                     except IndexError:
                         logger.warning(f"Element '{element.name}' position out of bounds during content validation")
                         element.content = ""
                         
             except Exception as e:
-                logger.warning(f"Error validating element {element.name}: {e}")
+                logger.error(f"Error validating element {element.name}: {e}")
                 # Mark element as invalid but don't remove it
                 element.content = ""
                 continue
@@ -504,7 +507,7 @@ class AdvancedParser(ABC):
                 end_byte=end_byte
             )
         except Exception as e:
-            logger.warning(f"Error creating position from node: {e}, node type: {getattr(node, 'type', 'unknown')}")
+            logger.error(f"Error creating position from node: {e}, node type: {getattr(node, 'type', 'unknown')}")
             # Return safe default position
             return SemanticPosition(
                 start_line=1, end_line=1,
@@ -538,7 +541,7 @@ class AdvancedParser(ABC):
                 
                 # Use fixed positions
                 extracted_text = source_code[start_byte:end_byte]
-                logger.debug(f"Extracted text using fixed positions {start_byte}-{end_byte}")
+                logger.warning(f"Extracted text using fixed positions {start_byte}-{end_byte}")
                 return extracted_text
             
             # Ensure start_byte <= end_byte
@@ -548,7 +551,7 @@ class AdvancedParser(ABC):
                 start_byte = node.end_byte
                 end_byte = node.start_byte
                 extracted_text = source_code[start_byte:end_byte]
-                logger.debug(f"Extracted text using swapped positions {start_byte}-{end_byte}")
+                logger.warning(f"Extracted text using swapped positions {start_byte}-{end_byte}")
                 return extracted_text
             
             # Normal case - positions are valid
@@ -556,10 +559,10 @@ class AdvancedParser(ABC):
             return extracted_text
             
         except IndexError as e:
-            logger.warning(f"Index error extracting node text: {e}, node: {node.start_byte}-{node.end_byte}, source length: {len(source_code)}")
+            logger.error(f"Index error extracting node text: {e}, node: {node.start_byte}-{node.end_byte}, source length: {len(source_code)}")
             return ""
         except Exception as e:
-            logger.warning(f"Unexpected error extracting node text: {e}")
+            logger.error(f"Unexpected error extracting node text: {e}")
             return ""
     
     def _find_child_by_type(self, node: ts.Node, node_type: str) -> Optional[ts.Node]:
@@ -579,7 +582,7 @@ class AdvancedParser(ABC):
                     return child
             return None
         except Exception as e:
-            logger.warning(f"Error finding child by type: {e}")
+            logger.error(f"Error finding child by type: {e}")
             return None
     
     def _find_children_by_type(self, node: ts.Node, node_type: str) -> List[ts.Node]:
@@ -596,7 +599,7 @@ class AdvancedParser(ABC):
         try:
             return [child for child in node.children if child.type == node_type]
         except Exception as e:
-            logger.warning(f"Error finding children by type: {e}")
+            logger.error(f"Error finding children by type: {e}")
             return []
     
     def _extract_documentation_comment(self, node: ts.Node, source_code: str) -> Optional[str]:
@@ -629,7 +632,7 @@ class AdvancedParser(ABC):
             
             return None
         except Exception as e:
-            logger.debug(f"Error extracting documentation comment: {e}")
+            logger.error(f"Error extracting documentation comment: {e}")
             return None
     
     def _clean_comment_text(self, comment: str) -> str:
@@ -662,7 +665,7 @@ class AdvancedParser(ABC):
             
             return '\n'.join(cleaned_lines).strip()
         except Exception as e:
-            logger.debug(f"Error cleaning comment text: {e}")
+            logger.error(f"Error cleaning comment text: {e}")
             return comment.strip()
     
     def get_statistics(self) -> Dict[str, Any]:
