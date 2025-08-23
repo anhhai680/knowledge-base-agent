@@ -56,8 +56,7 @@ class TextProcessor:
             logger.info("Enhanced chunking system initialized successfully")
             
         except Exception as e:
-            logger.warning(f"Failed to initialize enhanced chunking: {str(e)}")
-            logger.info("Falling back to traditional chunking")
+            logger.error(f"Failed to initialize enhanced chunking: {str(e)}. Falling back to traditional chunking")
             self.chunking_factory = None
             self.use_enhanced_chunking = False
     
@@ -134,8 +133,7 @@ class TextProcessor:
             logger.info("Registered all language-specific chunkers")
             
         except Exception as e:
-            logger.warning(f"Failed to register chunkers: {str(e)}")
-            logger.info("Enhanced chunking will not be available")
+            logger.error(f"Failed to register chunkers: {str(e)}. Enhanced chunking will not be available")
     
     def process_documents(self, documents: List[Document]) -> List[Document]:
         """Process and chunk documents using enhanced or traditional chunking"""
@@ -169,7 +167,7 @@ class TextProcessor:
                     # Skip empty documents but log them
                     if not cleaned_text.strip():
                         skipped_empty += 1
-                        logger.debug(f"Skipping empty document: {doc.metadata.get('file_path', 'unknown')}")
+                        logger.warning(f"Skipping empty document: {doc.metadata.get('file_path', 'unknown')}")
                         continue
                     
                     # Update document with cleaned content
@@ -177,15 +175,15 @@ class TextProcessor:
                     cleaned_documents.append(doc)
                     
                 except Exception as e:
-                    logger.warning(f"Failed to clean document {doc.metadata.get('file_path', 'unknown')}: {str(e)}")
+                    logger.error(f"Failed to clean document {doc.metadata.get('file_path', 'unknown')}: {str(e)}")
                     continue
             
             if skipped_empty > 0:
-                logger.info(f"Skipped {skipped_empty} empty documents during enhanced processing")
+                logger.warning(f"Skipped {skipped_empty} empty documents during enhanced processing")
             
             # Use chunking factory to process documents with timeout protection
             if cleaned_documents:
-                logger.debug(f"Processing {len(cleaned_documents)} cleaned documents with enhanced chunking")
+                logger.info(f"Processing {len(cleaned_documents)} cleaned documents with enhanced chunking")
                 
                 # Add timeout protection for chunking
                 chunked_docs = self._chunk_documents_with_timeout(cleaned_documents)
