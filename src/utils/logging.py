@@ -5,7 +5,14 @@ from typing import Optional
 def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> logging.Logger:
     """Setup structured logging configuration"""
     
-    # Create logger
+    # Configure root logger to ensure all loggers inherit the correct level
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, level.upper()))
+    
+    # Clear existing handlers from root logger
+    root_logger.handlers.clear()
+    
+    # Create our main logger
     logger = logging.getLogger("knowledge_base_agent")
     logger.setLevel(getattr(logging, level.upper()))
     
@@ -19,17 +26,29 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> loggin
     
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(getattr(logging, level.upper()))
     console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    
+    # Add handler only to root logger to avoid duplicate messages
+    root_logger.addHandler(console_handler)
+    
     
     # File handler (optional)
     if log_file:
         file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(getattr(logging, level.upper()))
         file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        root_logger.addHandler(file_handler)
+        
+    
+    # Ensure propagation is enabled for child loggers
+    logger.propagate = True
     
     return logger
 
 def get_logger(name: str = "knowledge_base_agent") -> logging.Logger:
     """Get logger instance"""
-    return logging.getLogger(name)
+    logger = logging.getLogger(name)
+    # Ensure logger propagates to root logger which has the handlers
+    logger.propagate = True
+    return logger
