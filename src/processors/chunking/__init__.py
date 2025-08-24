@@ -13,6 +13,7 @@ from .javascript_chunker import JavaScriptChunker
 from .typescript_chunker import TypeScriptChunker
 from .fallback_chunker import FallbackChunker
 from .markdown_chunker import MarkdownChunker
+from .tree_sitter_chunker import TreeSitterChunker
 
 __all__ = [
     'BaseChunker',
@@ -22,5 +23,6 @@ __all__ = [
     'JavaScriptChunker',
     'TypeScriptChunker',
     'FallbackChunker',
-    'MarkdownChunker'
+    'MarkdownChunker',
+    'TreeSitterChunker'
 ]

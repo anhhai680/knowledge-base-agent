@@ -4,7 +4,7 @@ from typing import List, Optional
 
 from ..config import settings
 from ..utils.logging import get_logger
-from .chunking import ChunkingFactory, PythonChunker, CSharpChunker, JavaScriptChunker, TypeScriptChunker, MarkdownChunker
+from .chunking import ChunkingFactory, PythonChunker, CSharpChunker, JavaScriptChunker, TypeScriptChunker, MarkdownChunker, TreeSitterChunker
 from ..config.chunking_config import ChunkingConfigManager
 
 logger = get_logger(__name__)
@@ -67,8 +67,17 @@ class TextProcessor:
             if not self.chunking_factory:
                 return
             
-            # Get configuration for chunkers
-            config = self.config_manager.get_config()
+            # Register TreeSitter chunker first (highest priority)
+            # This provides enhanced semantic chunking for multiple languages
+            try:
+                tree_sitter_chunker = TreeSitterChunker(
+                    max_chunk_size=self.chunk_size,
+                    chunk_overlap=self.chunk_overlap
+                )
+                self.chunking_factory.register_chunker(tree_sitter_chunker)
+                logger.info("Registered TreeSitterChunker for enhanced multi-language support")
+            except Exception as e:
+                logger.warning(f"Failed to register TreeSitterChunker: {str(e)}. Continuing with language-specific chunkers")
             
             # Register Python chunker
             python_config = self.config_manager.get_strategy_config('.py')
@@ -219,13 +228,15 @@ class TextProcessor:
         """
         import threading
         import time
+        from typing import Any
         
-        result = [None]
-        error = [None]
+        result: List[Any] = [None]
+        error: List[Any] = [None]
         
         def chunk_documents():
             try:
-                result[0] = self.chunking_factory.chunk_documents(documents)
+                if self.chunking_factory:
+                    result[0] = self.chunking_factory.chunk_documents(documents)
             except Exception as e:
                 error[0] = e
         
