@@ -17,7 +17,7 @@ from .advanced_parser import AdvancedParser, ParsingError, AdvancedParserError, 
 from .csharp_parser import CSharpAdvancedParser
 from .javascript_parser import JavaScriptAdvancedParser
 from .typescript_parser import TypeScriptAdvancedParser
-from .tree_sitter_parser import TreeSitterParser
+from .code_parser import CodeParser
 
 __all__ = [
     'ASTParser',
@@ -33,5 +33,5 @@ __all__ = [
     'CSharpAdvancedParser',
     'JavaScriptAdvancedParser',
     'TypeScriptAdvancedParser',
-    'TreeSitterParser'
+    'CodeParser'
 ]

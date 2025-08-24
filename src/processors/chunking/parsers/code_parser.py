@@ -8,7 +8,13 @@ import os
 import subprocess
 from typing import List, Dict, Union, Tuple, Optional
 from tree_sitter import Language, Parser, Node
-import logging
+import tree_sitter_python as ts_python
+import tree_sitter_javascript as ts_javascript
+import tree_sitter_typescript as ts_typescript
+import tree_sitter_c_sharp as ts_c_sharp
+import tree_sitter_css as ts_css
+import tree_sitter_php as ts_php
+
 
 # Import the logger utility from the utils package  
 from ....utils.logging import get_logger
@@ -16,45 +22,15 @@ from ....utils.logging import get_logger
 logger = get_logger(__name__)
 
 # Try to import language-specific bindings for tree-sitter 0.25.0+
-_language_modules = {}
+_language_modules = {
+    "python": ts_python,
+    "javascript": ts_javascript,
+    "typescript": ts_typescript,
+    "c_sharp": ts_c_sharp,
+    "css": ts_css,
+    "php": ts_php
+}
 MODERN_TREE_SITTER = False
-
-try:
-    import tree_sitter_python as ts_python
-    _language_modules['python'] = ts_python
-except ImportError:
-    pass
-
-try:
-    import tree_sitter_javascript as ts_javascript
-    _language_modules['javascript'] = ts_javascript
-except ImportError:
-    pass
-
-try:
-    import tree_sitter_typescript as ts_typescript
-    _language_modules['typescript'] = ts_typescript
-except ImportError:
-    pass
-
-try:
-    import tree_sitter_c_sharp as ts_c_sharp
-    _language_modules['c_sharp'] = ts_c_sharp
-except ImportError:
-    pass
-
-# Additional language modules that might be available
-try:
-    import tree_sitter_css as ts_css
-    _language_modules['css'] = ts_css
-except ImportError:
-    pass
-
-try:
-    import tree_sitter_php as ts_php
-    _language_modules['php'] = ts_php
-except ImportError:
-    pass
 
 if _language_modules:
     MODERN_TREE_SITTER = True
@@ -63,7 +39,7 @@ else:
     logger.warning("No modern tree-sitter bindings available, falling back to legacy mode")
 
 
-class TreeSitterParser:
+class CodeParser:
     """
     Enhanced tree-sitter parser for multi-language code analysis.
     Based on the provided CodeParser.py with integration improvements.
@@ -116,24 +92,12 @@ class TreeSitterParser:
             # Remove None values and duplicates while preserving order
             self.language_names = list(dict.fromkeys(lang for lang in language_names_with_none if lang is not None))
         
+        logger.info(f"Initializing CodeParser for languages: {self.language_names}")
         self.languages = {}
         self.parsers = {}
         self._install_parsers()
 
     def _install_parsers(self):
-        """Install and compile tree-sitter parsers for supported languages."""
-        try:
-            if MODERN_TREE_SITTER:
-                # Use modern tree-sitter language bindings
-                self._install_modern_parsers()
-            else:
-                # Fall back to legacy build system
-                self._install_legacy_parsers()
-
-        except Exception as e:
-            logger.error(f"An unexpected error occurred during parser installation: {str(e)}")
-
-    def _install_modern_parsers(self):
         """Install parsers using modern tree-sitter language bindings."""
         for language in self.language_names:
             try:
@@ -178,84 +142,6 @@ class TreeSitterParser:
             except Exception as e:
                 logger.error(f"Failed to load modern parser for {language}: {str(e)}")
                 continue
-
-    def _install_legacy_parsers(self):
-        """Install parsers using legacy build system (fallback)."""
-        # Ensure cache directory exists
-        if not os.path.exists(self.CACHE_DIR):
-            os.makedirs(self.CACHE_DIR)
-
-        for language in self.language_names:
-            try:
-                self._install_language_parser_legacy(language)
-            except Exception as e:
-                logger.error(f"Failed to install legacy parser for {language}: {str(e)}")
-                continue
-
-    def _install_language_parser_legacy(self, language: str) -> None:
-        """Install parser for a specific language."""
-        repo_name = self.repository_name_map.get(language, language)
-        repo_path = os.path.join(self.CACHE_DIR, f"tree-sitter-{repo_name}")
-        build_path = os.path.join(self.CACHE_DIR, f"build/{language}.so")
-
-        # Check if the repository exists and contains necessary files
-        if not os.path.exists(repo_path) or not self._is_repo_valid(repo_path, language):
-            try:
-                if os.path.exists(repo_path):
-                    logger.info(f"Updating existing repository for {language}")
-                    update_command = f"cd {repo_path} && git pull"
-                    subprocess.run(update_command, shell=True, check=True, 
-                                 capture_output=True, text=True)
-                else:
-                    logger.info(f"Cloning repository for {language}")
-                    clone_command = f"git clone https://github.com/tree-sitter/tree-sitter-{repo_name} {repo_path}"
-                    subprocess.run(clone_command, shell=True, check=True,
-                                 capture_output=True, text=True)
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Failed to clone/update repository for {language}. Error: {e}")
-                return
-
-        try:
-            build_dir = os.path.dirname(build_path)
-            
-            # Ensure build directory exists
-            if not os.path.exists(build_dir):
-                os.makedirs(build_dir)
-            
-            # Check if Language.build_library exists (legacy API)
-            if not hasattr(Language, 'build_library'):
-                logger.error(f"Language.build_library not available in this tree-sitter version. "
-                           f"Language {language} requires modern tree-sitter bindings.")
-                return
-            
-            # Special handling for different languages
-            if language == 'typescript':
-                ts_dir = os.path.join(repo_path, 'typescript')
-                tsx_dir = os.path.join(repo_path, 'tsx')
-                if os.path.exists(ts_dir) and os.path.exists(tsx_dir):
-                    Language.build_library(build_path, [ts_dir, tsx_dir])
-                else:
-                    raise FileNotFoundError(f"TypeScript or TSX directory not found in {repo_path}")
-            elif language == 'php':
-                php_dir = os.path.join(repo_path, 'php')
-                if os.path.exists(php_dir):
-                    Language.build_library(build_path, [php_dir])
-                else:
-                    raise FileNotFoundError(f"PHP directory not found in {repo_path}")
-            else:
-                Language.build_library(build_path, [repo_path])
-            
-            # Load the language and create parser
-            self.languages[language] = Language(build_path, language)
-            self.parsers[language] = Parser()
-            self.parsers[language].set_language(self.languages[language])
-            
-            logger.info(f"Successfully built and loaded {language} parser")
-            
-        except Exception as e:
-            logger.error(f"Failed to build or load language {language}. Error: {str(e)}")
-            logger.error(f"Repository path: {repo_path}")
-            logger.error(f"Build path: {build_path}")
 
     def _is_repo_valid(self, repo_path: str, language: str) -> bool:
         """Check if the repository contains necessary files."""

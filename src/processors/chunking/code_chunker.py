@@ -7,14 +7,14 @@ from typing import List, Dict, Any, Optional
 from langchain.docstore.document import Document
 
 from .base_chunker import BaseChunker, ChunkMetadata
-from .parsers.tree_sitter_parser import TreeSitterParser
+from .parsers.code_parser import CodeParser
 from ...utils.chunk_utils import count_tokens
 from ...utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-class TreeSitterChunker(BaseChunker):
+class CodeChunker(BaseChunker):
     """
     Enhanced chunker using tree-sitter for semantic boundary detection.
     
@@ -44,7 +44,7 @@ class TreeSitterChunker(BaseChunker):
         """Initialize the tree-sitter parser with error handling."""
         try:
             # Initialize parser for all supported languages
-            self.parser = TreeSitterParser()
+            self.parser = CodeParser()
             
             # Get supported extensions from the parser
             if self.parser:
@@ -52,13 +52,13 @@ class TreeSitterChunker(BaseChunker):
                 self._supported_extensions = [
                     f".{ext}" for ext, loaded in status.items() if loaded
                 ]
-                logger.info(f"TreeSitterChunker initialized with support for: {self._supported_extensions}")
+                logger.info(f"CodeChunker initialized with support for: {self._supported_extensions}")
             else:
-                logger.warning("TreeSitterParser initialization failed")
-                
+                logger.warning("CodeParser initialization failed")
+
         except Exception as e:
-            logger.error(f"Failed to initialize TreeSitterParser: {str(e)}")
-            logger.info("TreeSitterChunker will operate in fallback mode")
+            logger.error(f"Failed to initialize CodeParser: {str(e)}")
+            logger.info("CodeChunker will operate in fallback mode")
             self.parser = None
     
     def get_supported_extensions(self) -> List[str]:
@@ -87,13 +87,14 @@ class TreeSitterChunker(BaseChunker):
             
             file_path = document.metadata.get('file_path', '')
             file_extension = self._extract_file_extension(file_path)
-            
-            # Use tree-sitter chunking if parser is available and supports the language
-            if self.parser and self._can_use_tree_sitter(file_extension):
-                return self._chunk_with_tree_sitter(document, content, file_extension)
+
+            # Use code-parser chunking if parser is available and supports the language
+            if self.parser and self._can_use_code_parser(file_extension):
+                logger.debug(f"Using code-parser chunking for {file_path}")
+                return self._chunk_with_code_parser(document, content, file_extension)
             else:
                 # Fall back to simple chunking
-                logger.debug(f"Using fallback chunking for {file_path}")
+                logger.warning(f"Using fallback chunking for {file_path}")
                 return self._chunk_with_fallback(document, content, file_extension)
                 
         except Exception as e:
@@ -107,16 +108,16 @@ class TreeSitterChunker(BaseChunker):
             return file_path.split('.')[-1].lower()
         return ''
     
-    def _can_use_tree_sitter(self, file_extension: str) -> bool:
-        """Check if tree-sitter can be used for this file extension."""
+    def _can_use_code_parser(self, file_extension: str) -> bool:
+        """Check if code-parser can be used for this file extension."""
         return (self.parser is not None and 
                 self.parser.is_language_supported(file_extension) and
                 self.parser.is_language_loaded(file_extension))
-    
-    def _chunk_with_tree_sitter(self, document: Document, content: str, file_extension: str) -> List[Document]:
+
+    def _chunk_with_code_parser(self, document: Document, content: str, file_extension: str) -> List[Document]:
         """
-        Perform semantic chunking using tree-sitter analysis.
-        
+        Perform semantic chunking using code-parser analysis.
+
         Args:
             document: Original document
             content: Cleaned content
