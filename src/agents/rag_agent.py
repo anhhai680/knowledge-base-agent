@@ -76,7 +76,7 @@ class RAGAgent:
                     llm=self.llm,
                     chain_type="stuff",
                     retriever=self.vectorstore.as_retriever(**self.retriever_kwargs),
-                    return_source_documents=True,
+                    return_source_documents=False,  # CRITICAL FIX: Disable QA chain source docs to prevent duplicates
                     chain_type_kwargs={"prompt": prompt}
                 )
             except Exception as e:
@@ -160,14 +160,20 @@ class RAGAgent:
             # Perform initial retrieval
             initial_docs = self.vectorstore.similarity_search(question, **retrieval_kwargs)
             
+            # Remove duplicate documents to prevent source document duplication
+            unique_docs = self._deduplicate_documents(initial_docs)
+            
             # Add reasoning about document relevance
-            for doc in initial_docs:
+            for doc in unique_docs:
                 doc.metadata['relevance_reasoning'] = self._assess_document_relevance(doc, question, query_analysis)
             
-            return initial_docs
+            logger.info(f"Single query context built: {len(unique_docs)} unique documents from {len(initial_docs)} retrieved")
+            return unique_docs
         except Exception as e:
             logger.warning(f"Context building failed, using fallback: {str(e)}")
-            return self.vectorstore.similarity_search(question, k=5)
+            fallback_docs = self.vectorstore.similarity_search(question, k=5)
+            # Apply deduplication to fallback as well
+            return self._deduplicate_documents(fallback_docs)
     
     def _get_adaptive_retrieval_kwargs(self, query_analysis: QueryAnalysis) -> Dict[str, Any]:
         """Get adaptive retrieval parameters based on query analysis"""
@@ -249,22 +255,104 @@ class RAGAgent:
             return self._build_context_with_reasoning(queries[0], query_analysis)
     
     def _deduplicate_documents(self, documents: List[Document]) -> List[Document]:
-        """Remove duplicate documents based on content similarity"""
+        """Remove duplicate documents based on content similarity and metadata"""
         if not documents:
             return []
         
         unique_documents = []
         seen_contents = set()
+        seen_metadata_keys = set()
         
         for doc in documents:
-            # Create a content hash for deduplication
-            content_hash = hash(doc.page_content[:100])  # Use first 100 chars as hash
+            # Create a more robust content hash for deduplication
+            # Use normalized content (remove extra whitespace, normalize line endings)
+            normalized_content = ' '.join(doc.page_content.split())
+            content_hash = hash(normalized_content)
             
-            if content_hash not in seen_contents:
+            # Create a metadata key for additional deduplication
+            # Focus on file path, symbol name, and line numbers which are more stable
+            metadata_key = self._create_metadata_key(doc.metadata)
+            
+            # Check if we've seen this content or metadata before
+            if content_hash not in seen_contents and metadata_key not in seen_metadata_keys:
                 unique_documents.append(doc)
                 seen_contents.add(content_hash)
+                seen_metadata_keys.add(metadata_key)
+            else:
+                # If we have a duplicate, keep the one with more complete metadata
+                if metadata_key in seen_metadata_keys:
+                    # Find the existing document with this metadata key
+                    for existing_doc in unique_documents:
+                        existing_metadata_key = self._create_metadata_key(existing_doc.metadata)
+                        if existing_metadata_key == metadata_key:
+                            # Keep the one with more complete metadata
+                            if self._is_more_complete_metadata(doc.metadata, existing_doc.metadata):
+                                # Replace the existing document
+                                unique_documents.remove(existing_doc)
+                                unique_documents.append(doc)
+                                # Update the content hash set
+                                existing_normalized = ' '.join(existing_doc.page_content.split())
+                                existing_hash = hash(existing_normalized)
+                                seen_contents.discard(existing_hash)
+                                seen_contents.add(content_hash)
+                            break
         
+        logger.info(f"Document deduplication: {len(documents)} -> {len(unique_documents)} unique documents")
         return unique_documents
+    
+    def _create_metadata_key(self, metadata: Dict[str, Any]) -> str:
+        """Create a stable metadata key for deduplication"""
+        # Focus on stable identifiers that should be consistent across duplicate documents
+        key_parts = []
+        
+        # File path is the most stable identifier
+        if metadata.get('file_path'):
+            key_parts.append(metadata['file_path'])
+        
+        # Symbol name for code elements
+        if metadata.get('symbol_name'):
+            key_parts.append(metadata['symbol_name'])
+        
+        # Line numbers (start and end)
+        if metadata.get('line_start') and metadata.get('line_end'):
+            key_parts.append(f"{metadata['line_start']}-{metadata['line_end']}")
+        
+        # File name as fallback
+        if metadata.get('file_name') and not key_parts:
+            key_parts.append(metadata['file_name'])
+        
+        # Repository as additional context
+        if metadata.get('repository'):
+            key_parts.append(metadata['repository'])
+        
+        return '|'.join(str(part) for part in key_parts if part)
+    
+    def _is_more_complete_metadata(self, new_metadata: Dict[str, Any], existing_metadata: Dict[str, Any]) -> bool:
+        """Determine if new metadata is more complete than existing metadata"""
+        # Count non-empty metadata fields
+        new_count = sum(1 for v in new_metadata.values() if v is not None and v != '')
+        existing_count = sum(1 for v in existing_metadata.values() if v is not None and v != '')
+        
+        # Prefer metadata with more fields
+        if new_count != existing_count:
+            return new_count > existing_count
+        
+        # If field count is the same, prefer the one with more recent indexing
+        if new_metadata.get('indexed_at') and existing_metadata.get('indexed_at'):
+            try:
+                from datetime import datetime
+                new_time = datetime.fromisoformat(new_metadata['indexed_at'].replace('Z', '+00:00'))
+                existing_time = datetime.fromisoformat(existing_metadata['indexed_at'].replace('Z', '+00:00'))
+                return new_time > existing_time
+            except (ValueError, TypeError):
+                pass
+        
+        # If still tied, prefer the one with more recent chunk indexing
+        if new_metadata.get('chunk_index') is not None and existing_metadata.get('chunk_index') is not None:
+            return new_metadata['chunk_index'] > existing_metadata['chunk_index']
+        
+        # Default to keeping existing
+        return False
     
     def _assess_document_relevance(self, doc: Document, question: str, query_analysis: QueryAnalysis) -> str:
         """Assess and explain document relevance to the query"""
@@ -295,28 +383,39 @@ class RAGAgent:
     
     def _generate_response_with_reasoning(self, question: str, context: List[Document], 
                                        query_analysis: QueryAnalysis) -> Dict[str, Any]:
-        """Generate response with reasoning transparency"""
+        """Generate response with reasoning transparency using custom logic instead of QA chain"""
         try:
-            # Use modern LangChain invoke method with correct input key for RetrievalQA
-            try:
-                result = self.qa_chain.invoke({"query": question})
-                answer = result.get("result", result.get("answer", ""))
-                source_docs = result.get("source_documents", result.get("context", []))
-            except (AttributeError, KeyError):
-                # Fallback for different chain formats
+            # CRITICAL FIX: Generate response using our own logic instead of QA chain to prevent duplicates
+            # Use the LLM directly with our deduplicated context
+            if not context:
+                answer = "I cannot find the answer in the provided context. Please provide more details or clarify your question."
+            else:
+                # Create a simple prompt for the LLM
+                context_text = "\n\n".join([doc.page_content for doc in context])
+                prompt = f"""Based on the following context, answer the question. If you cannot answer from the context, say so.
+
+Context:
+{context_text}
+
+Question: {question}
+
+Answer:"""
+                
                 try:
-                    result = self.qa_chain.invoke({"input": question})
-                    answer = result.get("answer", result.get("result", ""))
-                    source_docs = result.get("context", result.get("source_documents", []))
-                except Exception as fallback_error:
-                    logger.warning(f"Chain invoke failed, trying legacy format: {str(fallback_error)}")
-                    # Last resort: try legacy format if available
-                    if hasattr(self.qa_chain, '__call__'):
-                        result = self.qa_chain({"query": question})
-                        answer = result.get("result", "")
-                        source_docs = result.get("source_documents", [])
+                    # Use the LLM directly
+                    answer = self.llm.invoke(prompt)
+                    if hasattr(answer, 'content'):
+                        answer = answer.content
+                    elif isinstance(answer, str):
+                        answer = answer
                     else:
-                        raise Exception("Unable to invoke QA chain with any supported method")
+                        answer = str(answer)
+                except Exception as e:
+                    logger.warning(f"LLM invocation failed: {str(e)}")
+                    answer = "I cannot find the answer in the provided context. Please provide more details or clarify your question."
+            
+            # CRITICAL FIX: Use our own deduplicated context instead of QA chain source docs
+            source_docs = context  # Use our deduplicated context
             
             # Add reasoning metadata
             response = {
@@ -378,10 +477,17 @@ class RAGAgent:
                                 context: List[Document]) -> Dict[str, Any]:
         """Format final response with enhancement metadata"""
         try:
+            # CRITICAL FIX: Ensure source documents are deduplicated before formatting
+            source_docs = response.get("source_documents", [])
+            if source_docs:
+                # Apply final deduplication as a safety measure
+                source_docs = self._deduplicate_documents(source_docs)
+                logger.info(f"Final deduplication in response formatting: {len(source_docs)} unique documents")
+            
             # Format source documents
-            source_docs = []
-            for doc in response.get("source_documents", []):
-                source_docs.append({
+            formatted_docs = []
+            for doc in source_docs:
+                formatted_docs.append({
                     "content": doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content,
                     "metadata": doc.metadata
                 })
@@ -389,9 +495,9 @@ class RAGAgent:
             # Build enhanced response
             enhanced_response = {
                 "answer": response["answer"],
-                "source_documents": source_docs,
+                "source_documents": formatted_docs,
                 "status": "success",
-                "num_sources": len(source_docs),
+                "num_sources": len(formatted_docs),
                 "error": None,
                 
                 # Enhancement metadata
@@ -408,7 +514,7 @@ class RAGAgent:
                 "diagram_type": None
             }
             
-            logger.info(f"Enhanced query processed successfully with {len(source_docs)} source documents")
+            logger.info(f"Enhanced query processed successfully with {len(formatted_docs)} source documents")
             return enhanced_response
             
         except Exception as e:
@@ -456,34 +562,34 @@ class RAGAgent:
         logger.info("Falling back to basic query processing")
         
         try:
-            # Use modern LangChain invoke method with correct input key for RetrievalQA
+            # CRITICAL FIX: Use simple retrieval instead of QA chain to prevent duplicates
+            # Get documents directly from vectorstore
             try:
-                result = self.qa_chain.invoke({"query": question})
-                answer = result.get("result", result.get("answer", ""))
-                source_docs = result.get("source_documents", result.get("context", []))
-            except (AttributeError, KeyError):
-                # Fallback for different chain formats
-                try:
-                    result = self.qa_chain.invoke({"input": question})
-                    answer = result.get("answer", result.get("result", ""))
-                    source_docs = result.get("context", result.get("source_documents", []))
-                except Exception as fallback_error:
-                    logger.warning(f"Chain invoke failed, trying legacy format: {str(fallback_error)}")
-                    # Last resort: try legacy format if available
-                    if hasattr(self.qa_chain, '__call__'):
-                        result = self.qa_chain({"query": question})
-                        answer = result.get("result", "")
-                        source_docs = result.get("source_documents", [])
-                    else:
-                        raise Exception("Unable to invoke QA chain with any supported method")
-            
-            # Format source documents
-            formatted_docs = []
-            for doc in source_docs:
-                formatted_docs.append({
-                    "content": doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content,
-                    "metadata": doc.metadata
-                })
+                fallback_docs = self.vectorstore.similarity_search(question, k=5)
+                # Apply deduplication
+                unique_docs = self._deduplicate_documents(fallback_docs)
+                
+                # Generate simple answer
+                if unique_docs:
+                    context_text = "\n\n".join([doc.page_content[:200] for doc in unique_docs])
+                    answer = f"I found some relevant information: {context_text[:500]}..."
+                else:
+                    answer = "I cannot find the answer in the provided context. Please provide more details or clarify your question."
+                
+                # Format source documents
+                formatted_docs = []
+                for doc in unique_docs:
+                    formatted_docs.append({
+                        "content": doc.page_content[:500] + "..." if len(doc.page_content) > 500 else doc.page_content,
+                        "metadata": doc.metadata
+                    })
+                
+                logger.info(f"Fallback processing completed with {len(formatted_docs)} unique documents")
+                
+            except Exception as retrieval_error:
+                logger.warning(f"Fallback retrieval failed: {str(retrieval_error)}")
+                answer = "I encountered an error while processing your query. Please try again."
+                formatted_docs = []
             
             return {
                 "answer": answer,

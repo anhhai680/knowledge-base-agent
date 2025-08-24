@@ -503,15 +503,8 @@ class EnhancedCodeRetriever:
     
     def _deduplicate_and_rank_results(self, results: List[Document], query: str, intent: Dict[str, Any]) -> List[Document]:
         """Remove duplicates and rank results by relevance with intent awareness"""
-        # Simple deduplication by content hash
-        seen_content = set()
-        unique_results = []
-        
-        for doc in results:
-            content_hash = hash(doc.page_content[:100])  # Hash first 100 chars
-            if content_hash not in seen_content:
-                seen_content.add(content_hash)
-                unique_results.append(doc)
+        # Enhanced deduplication using both content and metadata
+        unique_results = self._deduplicate_documents_enhanced(results)
         
         # Enhanced ranking with intent awareness
         def relevance_score(doc):
@@ -566,6 +559,106 @@ class EnhancedCodeRetriever:
         unique_results.sort(key=relevance_score, reverse=True)
         
         return unique_results
+    
+    def _deduplicate_documents_enhanced(self, documents: List[Document]) -> List[Document]:
+        """Enhanced deduplication using both content and metadata"""
+        if not documents:
+            return []
+        
+        unique_documents = []
+        seen_contents = set()
+        seen_metadata_keys = set()
+        
+        for doc in documents:
+            # Create a more robust content hash for deduplication
+            # Use normalized content (remove extra whitespace, normalize line endings)
+            normalized_content = ' '.join(doc.page_content.split())
+            content_hash = hash(normalized_content)
+            
+            # Create a metadata key for additional deduplication
+            # Focus on file path, symbol name, and line numbers which are more stable
+            metadata_key = self._create_metadata_key(doc.metadata)
+            
+            # Check if we've seen this content or metadata before
+            if content_hash not in seen_contents and metadata_key not in seen_metadata_keys:
+                unique_documents.append(doc)
+                seen_contents.add(content_hash)
+                seen_metadata_keys.add(metadata_key)
+            else:
+                # If we have a duplicate, keep the one with more complete metadata
+                if metadata_key in seen_metadata_keys:
+                    # Find the existing document with this metadata key
+                    for existing_doc in unique_documents:
+                        existing_metadata_key = self._create_metadata_key(existing_doc.metadata)
+                        if existing_metadata_key == metadata_key:
+                            # Keep the one with more complete metadata
+                            if self._is_more_complete_metadata(doc.metadata, existing_doc.metadata):
+                                # Replace the existing document
+                                unique_documents.remove(existing_doc)
+                                unique_documents.append(doc)
+                                # Update the content hash set
+                                existing_normalized = ' '.join(existing_doc.page_content.split())
+                                existing_hash = hash(existing_normalized)
+                                seen_contents.discard(existing_hash)
+                                seen_contents.add(content_hash)
+                            break
+        
+        logger.info(f"Enhanced document deduplication: {len(documents)} -> {len(unique_documents)} unique documents")
+        return unique_documents
+    
+    def _create_metadata_key(self, metadata: Dict[str, Any]) -> str:
+        """Create a stable metadata key for deduplication"""
+        # Focus on stable identifiers that should be consistent across duplicate documents
+        key_parts = []
+        
+        # File path is the most stable identifier
+        if metadata.get('file_path'):
+            key_parts.append(metadata['file_path'])
+        
+        # Symbol name for code elements
+        if metadata.get('symbol_name'):
+            key_parts.append(metadata['symbol_name'])
+        
+        # Line numbers (start and end)
+        if metadata.get('line_start') and metadata.get('line_end'):
+            key_parts.append(f"{metadata['line_start']}-{metadata['line_end']}")
+        
+        # File name as fallback
+        if metadata.get('file_name') and not key_parts:
+            key_parts.append(metadata['file_name'])
+        
+        # Repository as additional context
+        if metadata.get('repository'):
+            key_parts.append(metadata['repository'])
+        
+        return '|'.join(str(part) for part in key_parts if part)
+    
+    def _is_more_complete_metadata(self, new_metadata: Dict[str, Any], existing_metadata: Dict[str, Any]) -> bool:
+        """Determine if new metadata is more complete than existing metadata"""
+        # Count non-empty metadata fields
+        new_count = sum(1 for v in new_metadata.values() if v is not None and v != '')
+        existing_count = sum(1 for v in existing_metadata.values() if v is not None and v != '')
+        
+        # Prefer metadata with more fields
+        if new_count != existing_count:
+            return new_count > existing_count
+        
+        # If field count is the same, prefer the one with more recent indexing
+        if new_metadata.get('indexed_at') and existing_metadata.get('indexed_at'):
+            try:
+                from datetime import datetime
+                new_time = datetime.fromisoformat(new_metadata['indexed_at'].replace('Z', '+00:00'))
+                existing_time = datetime.fromisoformat(existing_metadata['indexed_at'].replace('Z', '+00:00'))
+                return new_time > existing_time
+            except (ValueError, TypeError):
+                pass
+        
+        # If still tied, prefer the one with more recent chunk indexing
+        if new_metadata.get('chunk_index') is not None and existing_metadata.get('chunk_index') is not None:
+            return new_metadata['chunk_index'] > existing_metadata['chunk_index']
+        
+        # Default to keeping existing
+        return False
     
     def _filter_code_documents(self, documents: List[Document]) -> List[Document]:
         """Filter documents to keep only code-related content"""
