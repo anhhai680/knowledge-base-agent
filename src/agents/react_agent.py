@@ -170,6 +170,11 @@ class ReActAgent(RAGAgent):
             self.iteration_count += 1
             logger.info(f"ReAct iteration {self.iteration_count}/{self.max_iterations}")
             
+            # CRITICAL FIX: Ensure context is deduplicated at each iteration to prevent duplicates
+            if hasattr(self, '_deduplicate_documents') and current_context:
+                current_context = self._deduplicate_documents(current_context)
+                logger.debug(f"Iteration {self.iteration_count}: Context deduplicated to {len(current_context)} unique documents")
+            
             # Step 1: Observe current state
             observation = self._observe_current_state(current_question, current_context, self.action_history)
             
@@ -210,6 +215,11 @@ class ReActAgent(RAGAgent):
                 )
             else:
                 logger.info("No action planned, continuing with reasoning")
+        
+        # CRITICAL FIX: Final deduplication before generating response to ensure clean context
+        if hasattr(self, '_deduplicate_documents') and current_context:
+            current_context = self._deduplicate_documents(current_context)
+            logger.info(f"Final context deduplication: {len(current_context)} unique documents for response generation")
         
         # Generate final response
         final_response = self._generate_react_response(question, current_context, query_analysis)
@@ -276,11 +286,27 @@ class ReActAgent(RAGAgent):
         if action_result and "result" in action_result:
             result_content = f"Action {action.name} ({action.action_type.value}) result: {action_result['result']}"
             
-            # Add to context (this would typically be added to the vector store)
-            # For now, we'll just return the enhanced context
+            # Create a new document for the action result
+            from langchain.schema import Document
+            action_doc = Document(
+                page_content=result_content,
+                metadata={
+                    "source": "react_action",
+                    "action_name": action.name,
+                    "action_type": action.action_type.value,
+                    "iteration": self.iteration_count,
+                    "timestamp": "action_execution"
+                }
+            )
+            
+            # Add to context and apply deduplication to prevent duplicates
             enhanced_context = context.copy()
-            # In a real implementation, you'd add the result to the vector store
-            # and retrieve updated context
+            enhanced_context.append(action_doc)
+            
+            # CRITICAL FIX: Apply deduplication to prevent duplicate source documents
+            if hasattr(self, '_deduplicate_documents'):
+                enhanced_context = self._deduplicate_documents(enhanced_context)
+                logger.info(f"Applied deduplication after action result: {len(enhanced_context)} unique documents")
             
             return enhanced_context
         
