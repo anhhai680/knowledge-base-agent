@@ -29,9 +29,9 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> loggin
     console_handler.setLevel(getattr(logging, level.upper()))
     console_handler.setFormatter(formatter)
     
-    # Add handler to both root and main logger to ensure coverage
+    # Add handler only to root logger to avoid duplicate messages
     root_logger.addHandler(console_handler)
-    logger.addHandler(console_handler)
+    
     
     # File handler (optional)
     if log_file:
@@ -39,7 +39,7 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> loggin
         file_handler.setLevel(getattr(logging, level.upper()))
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
-        logger.addHandler(file_handler)
+        
     
     # Ensure propagation is enabled for child loggers
     logger.propagate = True
