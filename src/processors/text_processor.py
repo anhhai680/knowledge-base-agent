@@ -63,86 +63,106 @@ class TextProcessor:
     def _register_chunkers(self) -> None:
         """Register language-specific chunkers with the factory."""
         try:
+            logger.debug("Starting chunker registration process")
+            
             # Ensure chunking factory is available
             if not self.chunking_factory:
+                logger.warning("Chunking factory not available - cannot register chunkers")
                 return
+            
+            logger.debug("Chunking factory available, proceeding with registration")
             
             # Register TreeSitter chunker first (highest priority)
             # This provides enhanced semantic chunking for multiple languages
             try:
+                logger.debug("Attempting to register TreeSitterChunker")
                 tree_sitter_chunker = TreeSitterChunker(
                     max_chunk_size=self.chunk_size,
                     chunk_overlap=self.chunk_overlap
                 )
                 self.chunking_factory.register_chunker(tree_sitter_chunker)
                 logger.info("Registered TreeSitterChunker for enhanced multi-language support")
+                logger.debug(f"TreeSitterChunker supports extensions: {tree_sitter_chunker.get_supported_extensions()}")
             except Exception as e:
-                logger.warning(f"Failed to register TreeSitterChunker: {str(e)}. Continuing with language-specific chunkers")
+                logger.error(f"Failed to register TreeSitterChunker: {str(e)}. Continuing with language-specific chunkers")
             
-            # Register Python chunker
-            python_config = self.config_manager.get_strategy_config('.py')
-            if python_config:
-                python_chunker = PythonChunker(
-                    max_chunk_size=python_config.max_chunk_size,
-                    chunk_overlap=python_config.chunk_overlap
-                )
-            else:
-                python_chunker = PythonChunker()
+            # # Register Python chunker
+            # python_config = self.config_manager.get_strategy_config('.py')
+            # if python_config:
+            #     python_chunker = PythonChunker(
+            #         max_chunk_size=python_config.max_chunk_size,
+            #         chunk_overlap=python_config.chunk_overlap
+            #     )
+            # else:
+            #     python_chunker = PythonChunker()
             
-            self.chunking_factory.register_chunker(python_chunker)
+            # self.chunking_factory.register_chunker(python_chunker)
             
-            # Register C# chunker
-            csharp_config = self.config_manager.get_strategy_config('.cs')
-            if csharp_config:
-                csharp_chunker = CSharpChunker(
-                    max_chunk_size=csharp_config.max_chunk_size,
-                    chunk_overlap=csharp_config.chunk_overlap
-                )
-            else:
-                csharp_chunker = CSharpChunker()
+            # # Register C# chunker
+            # csharp_config = self.config_manager.get_strategy_config('.cs')
+            # if csharp_config:
+            #     csharp_chunker = CSharpChunker(
+            #         max_chunk_size=csharp_config.max_chunk_size,
+            #         chunk_overlap=csharp_config.chunk_overlap
+            #     )
+            # else:
+            #     csharp_chunker = CSharpChunker()
             
-            self.chunking_factory.register_chunker(csharp_chunker)
+            # self.chunking_factory.register_chunker(csharp_chunker)
             
-            # Register JavaScript chunker
-            js_config = self.config_manager.get_strategy_config('.js')
-            if js_config:
-                js_chunker = JavaScriptChunker(
-                    max_chunk_size=js_config.max_chunk_size,
-                    chunk_overlap=js_config.chunk_overlap
-                )
-            else:
-                js_chunker = JavaScriptChunker()
+            # # Register JavaScript chunker
+            # js_config = self.config_manager.get_strategy_config('.js')
+            # if js_config:
+            #     js_chunker = JavaScriptChunker(
+            #         max_chunk_size=js_config.max_chunk_size,
+            #         chunk_overlap=js_config.chunk_overlap
+            #     )
+            # else:
+            #     js_chunker = JavaScriptChunker()
             
-            self.chunking_factory.register_chunker(js_chunker)
+            # self.chunking_factory.register_chunker(js_chunker)
             
-            # Register TypeScript chunker
-            ts_config = self.config_manager.get_strategy_config('.ts')
-            if ts_config:
-                ts_chunker = TypeScriptChunker(
-                    max_chunk_size=ts_config.max_chunk_size,
-                    chunk_overlap=ts_config.chunk_overlap
-                )
-            else:
-                ts_chunker = TypeScriptChunker()
+            # # Register TypeScript chunker
+            # ts_config = self.config_manager.get_strategy_config('.ts')
+            # if ts_config:
+            #     ts_chunker = TypeScriptChunker(
+            #         max_chunk_size=ts_config.max_chunk_size,
+            #         chunk_overlap=ts_config.chunk_overlap
+            #     )
+            # else:
+            #     ts_chunker = TypeScriptChunker()
             
-            self.chunking_factory.register_chunker(ts_chunker)
+            # self.chunking_factory.register_chunker(ts_chunker)
             
             # Register Markdown chunker with diagram awareness
-            md_config = self.config_manager.get_strategy_config('.md')
-            if md_config:
-                markdown_chunker = MarkdownChunker(
-                    max_chunk_size=md_config.max_chunk_size,
-                    chunk_overlap=md_config.chunk_overlap
-                )
+            try:
+                logger.debug("Attempting to register MarkdownChunker")
+                md_config = self.config_manager.get_strategy_config('.md')
+                if md_config:
+                    markdown_chunker = MarkdownChunker(
+                        max_chunk_size=md_config.max_chunk_size,
+                        chunk_overlap=md_config.chunk_overlap
+                    )
+                else:
+                    markdown_chunker = MarkdownChunker()
+                
+                self.chunking_factory.register_chunker(markdown_chunker)
+                logger.debug(f"Registered MarkdownChunker supporting extensions: {markdown_chunker.get_supported_extensions()}")
+            except Exception as e:
+                logger.warning(f"Failed to register MarkdownChunker: {str(e)}")
+                logger.debug(f"MarkdownChunker registration error details: {e}", exc_info=True)
+            
+            # Log final registration summary
+            if hasattr(self.chunking_factory, 'get_supported_extensions'):
+                supported_extensions = self.chunking_factory.get_supported_extensions()
+                logger.info(f"Registered all language-specific chunkers. Total supported extensions: {len(supported_extensions)}")
+                logger.debug(f"Supported extensions: {supported_extensions}")
             else:
-                markdown_chunker = MarkdownChunker()
-            
-            self.chunking_factory.register_chunker(markdown_chunker)
-            
-            logger.info("Registered all language-specific chunkers")
+                logger.info("Registered all language-specific chunkers")
             
         except Exception as e:
             logger.error(f"Failed to register chunkers: {str(e)}. Enhanced chunking will not be available")
+            logger.debug(f"Chunker registration error details: {e}", exc_info=True)
     
     def process_documents(self, documents: List[Document]) -> List[Document]:
         """Process and chunk documents using enhanced or traditional chunking"""
