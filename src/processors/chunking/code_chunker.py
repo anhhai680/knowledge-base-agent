@@ -3,7 +3,7 @@ Tree-sitter based chunker that provides enhanced semantic chunking across multip
 Based on the provided Chunker.py with integration into the existing chunking system.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from langchain.docstore.document import Document
 
 from .base_chunker import BaseChunker, ChunkMetadata

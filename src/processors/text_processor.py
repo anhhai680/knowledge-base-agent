@@ -76,9 +76,10 @@ class TextProcessor:
             # This provides enhanced semantic chunking for multiple languages
             try:
                 logger.debug("Attempting to register CodeChunker")
+                csharp_config = self.config_manager.get_strategy_config('.cs')
                 code_chunker = CodeChunker(
-                    max_chunk_size=self.chunk_size,
-                    chunk_overlap=self.chunk_overlap
+                    max_chunk_size=csharp_config.max_chunk_size if csharp_config else self.chunk_size,
+                    chunk_overlap=csharp_config.chunk_overlap if csharp_config else self.chunk_overlap
                 )
                 self.chunking_factory.register_chunker(code_chunker)
                 logger.info("Registered CodeChunker for enhanced multi-language support")
@@ -90,13 +91,10 @@ class TextProcessor:
             try:
                 logger.debug("Attempting to register MarkdownChunker")
                 md_config = self.config_manager.get_strategy_config('.md')
-                if md_config:
-                    markdown_chunker = MarkdownChunker(
-                        max_chunk_size=md_config.max_chunk_size,
-                        chunk_overlap=md_config.chunk_overlap
-                    )
-                else:
-                    markdown_chunker = MarkdownChunker()
+                markdown_chunker = MarkdownChunker(
+                    max_chunk_size=md_config.max_chunk_size if md_config else self.chunk_size,
+                    chunk_overlap=md_config.chunk_overlap if md_config else self.chunk_overlap
+                )
                 
                 self.chunking_factory.register_chunker(markdown_chunker)
                 logger.debug(f"Registered MarkdownChunker supporting extensions: {markdown_chunker.get_supported_extensions()}")
